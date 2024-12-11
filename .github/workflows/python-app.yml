@@ -37,11 +37,11 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          # 确保 icon.ico 文件存在
-          if [ ! -f "icon.ico" ]; then
-            echo "Error: icon.ico file not found in the root directory."
+          # 确保 icon.ico 文件存在（PowerShell 语法）
+          if (-Not (Test-Path -Path "icon.ico")) {
+            Write-Error "Error: icon.ico file not found in the root directory."
             exit 1
-          fi
+          }
 
           # 使用绝对路径打包
           pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
