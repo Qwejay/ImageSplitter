@@ -7,7 +7,7 @@ import io
 from tkinterdnd2 import TkinterDnD, DND_FILES
 
 root = TkinterDnD.Tk()
-root.title("Image Splitter v1.0 —— QwejayHuang")
+root.title("Image Splitter v1.1 —— QwejayHuang")
 
 # 全局变量
 file_path = ""
@@ -22,10 +22,13 @@ def get_original_image():
     if file_extension == '.pdf':
         doc = fitz.open(file_path)
         page = doc.load_page(0)
-        pix = page.get_pixmap(alpha=True)  # 保留alpha通道
-        return Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+        pix = page.get_pixmap(alpha=True, dpi=300)  # 设置dpi为300
+        img_rgba = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+        img_white = Image.new("RGB", img_rgba.size, (255, 255, 255)).convert("RGBA")
+        img_rgb = Image.alpha_composite(img_white, img_rgba)
+        return img_rgb
     else:
-        return Image.open(file_path).convert("RGBA")
+        return Image.open(file_path).convert("RGB")
 
 # 拆分图像
 def split_image(img, direction):
@@ -48,7 +51,7 @@ def save_images(imgs, extension):
         new_doc = fitz.open()
         for i, img in enumerate(imgs):
             with io.BytesIO() as output:
-                img.save(output, format="PNG")
+                img.convert("RGB").save(output, format="PNG", dpi=(300, 300))  # 设置dpi为300
                 image_bytes = output.getvalue()
             page = new_doc.new_page(width=img.width, height=img.height)
             page.insert_image(fitz.Rect(0, 0, img.width, img.height), stream=image_bytes)
@@ -69,7 +72,7 @@ def save_images(imgs, extension):
         for i, img in enumerate(imgs):
             save_path = os.path.splitext(file_path)[0] + f"_part{i+1}" + extension
             if mode == 'RGB':
-                img.convert("RGB").save(save_path)
+                img.convert("RGB").save(save_path, quality=95)  # 设置质量为95
             else:
                 img.save(save_path)
         messagebox.showinfo("成功", f"图像保存成功，共 {len(imgs)} 个部分。")
@@ -149,9 +152,9 @@ def display_image():
     global img
     if img:
         image_canvas.delete("all")  # 清空Canvas
-        img_width, img_height = img.size
         canvas_width = image_canvas.winfo_width()
         canvas_height = image_canvas.winfo_height()
+        img_width, img_height = img.size
         # 保持AspectRatio
         if img_width / img_height > canvas_width / canvas_height:
             new_width = canvas_width
@@ -161,10 +164,13 @@ def display_image():
             new_width = int(new_height * img_width / img_height)
         resized_img = img.resize((new_width, new_height))
         photo = ImageTk.PhotoImage(resized_img)
-        image_canvas.create_image(0, 0, anchor='nw', image=photo)
+        image_canvas.create_image(canvas_width / 2, canvas_height / 2, anchor='center', image=photo)
         image_canvas.image = photo  # 保持对图像的引用
         # 绘制分割线
         draw_split_line()
+
+# 绑定Configure事件到Canvas
+image_canvas.bind("<Configure>", lambda event: display_image())
 
 # 绘制分割线
 def draw_split_line():
