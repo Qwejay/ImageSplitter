@@ -37,14 +37,14 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          # 确保 logo.ico 文件存在
-          if [ ! -f "logo.ico" ]; then
-            echo "Error: logo.ico file not found in the root directory."
+          # 确保 icon.ico 文件存在
+          if [ ! -f "icon.ico" ]; then
+            echo "Error: icon.ico file not found in the root directory."
             exit 1
           fi
 
           # 使用绝对路径打包
-          pyinstaller --onefile --windowed --icon=logo.ico --add-data "logo.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
+          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
