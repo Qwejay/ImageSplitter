@@ -37,7 +37,7 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=logo.ico --add-data "logo.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
+          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
