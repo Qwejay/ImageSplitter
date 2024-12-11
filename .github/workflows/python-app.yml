@@ -37,7 +37,14 @@ jobs:
 
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
+          # 确保 logo.ico 文件存在
+          if [ ! -f "logo.ico" ]; then
+            echo "Error: logo.ico file not found in the root directory."
+            exit 1
+          fi
+
+          # 使用绝对路径打包
+          pyinstaller --onefile --windowed --icon=logo.ico --add-data "logo.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -52,22 +59,30 @@ jobs:
           script: |
             const tagName = 'v1.1';
             const releaseName = 'Release v1.1';
-            const release = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: tagName,
-              name: releaseName,
-              draft: false,
-              prerelease: false,
-            });
-            return release;
+            try {
+              const release = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: tagName,
+                name: releaseName,
+                draft: false,
+                prerelease: false,
+              });
+              console.log("Release created successfully:", release.data.html_url);
+              return {
+                upload_url: release.data.upload_url,
+              };
+            } catch (error) {
+              console.error("Failed to create release:", error);
+              throw error;
+            }
 
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.data.upload_url }}
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: dist/ImageSplitter.exe
           asset_name: ImageSplitter.exe
           asset_content_type: application/octet-stream
