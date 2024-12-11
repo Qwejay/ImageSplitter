@@ -9,55 +9,77 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 root = TkinterDnD.Tk()
 root.title("Image Splitter v1.1 —— QwejayHuang")
 
+# 设置 grid 布局权重
+root.grid_rowconfigure(0, weight=0)
+root.grid_rowconfigure(1, weight=1)
+root.grid_rowconfigure(2, weight=0)
+root.grid_columnconfigure(0, weight=1)
+
 # 全局变量
 file_path = ""
-img = None
+imgs = []
 file_extension = ""
 split_position = 0.5
-split_direction = '垂直'
+split_direction = '不拆分'
 save_format = '.pdf'
+current_page = 1
+total_pages = 1
+
+# 函数定义
 
 # 获取原始图像
 def get_original_image():
     if file_extension == '.pdf':
         doc = fitz.open(file_path)
-        page = doc.load_page(0)
-        pix = page.get_pixmap(alpha=True, dpi=300)  # 设置dpi为300
-        img_rgba = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
-        img_white = Image.new("RGB", img_rgba.size, (255, 255, 255)).convert("RGBA")
-        img_rgb = Image.alpha_composite(img_white, img_rgba)
-        return img_rgb
+        images = []
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            pix = page.get_pixmap(alpha=True, dpi=300)
+            img_rgba = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+            img_white = Image.new("RGB", img_rgba.size, (255, 255, 255)).convert("RGBA")
+            img_rgb = Image.alpha_composite(img_white, img_rgba)
+            images.append(img_rgb)
+        return images
     else:
-        return Image.open(file_path).convert("RGB")
+        return [Image.open(file_path).convert("RGB")]
 
 # 拆分图像
-def split_image(img, direction):
-    if direction == '垂直':
-        split_width = int(img.width * split_position)
-        left_img = img.crop((0, 0, split_width, img.height))
-        right_img = img.crop((split_width, 0, img.width, img.height))
-        return [left_img, right_img]
-    elif direction == '水平':
-        split_height = int(img.height * split_position)
-        top_img = img.crop((0, 0, img.width, split_height))
-        bottom_img = img.crop((0, split_height, img.width, img.height))
-        return [top_img, bottom_img]
-    elif direction == '不拆分':
-        return [img]
+def split_image(imgs, direction):
+    split_imgs = []
+    for img in imgs:
+        if direction == '垂直':
+            split_width = int(img.width * split_position)
+            left_img = img.crop((0, 0, split_width, img.height))
+            right_img = img.crop((split_width, 0, img.width, img.height))
+            split_imgs.extend([left_img, right_img])
+        elif direction == '水平':
+            split_height = int(img.height * split_position)
+            top_img = img.crop((0, 0, img.width, split_height))
+            bottom_img = img.crop((0, split_height, img.width, img.height))
+            split_imgs.extend([top_img, bottom_img])
+        elif direction == '不拆分':
+            split_imgs.append(img)
+    return split_imgs
 
 # 保存图像
 def save_images(imgs, extension):
     if extension == '.pdf':
         new_doc = fitz.open()
-        for i, img in enumerate(imgs):
+        dpi = 150  # 设置新的DPI
+        for img in imgs:
+            img_rgb = img.convert("RGB")
+            img_rgb = img.resize((int(img.width * 150 / img.info.get('dpi', 300)[0]),
+                                  int(img.height * 150 / img.info.get('dpi', 300)[1])))
             with io.BytesIO() as output:
-                img.convert("RGB").save(output, format="PNG", dpi=(300, 300))  # 设置dpi为300
+                img_rgb.save(output, format="JPEG", quality=85)
                 image_bytes = output.getvalue()
-            page = new_doc.new_page(width=img.width, height=img.height)
-            page.insert_image(fitz.Rect(0, 0, img.width, img.height), stream=image_bytes)
+            width = img_rgb.width / (dpi / 72)
+            height = img_rgb.height / (dpi / 72)
+            page = new_doc.new_page(width=width, height=height)
+            page.insert_image(fitz.Rect(0, 0, width, height), stream=image_bytes)
         save_path = os.path.splitext(file_path)[0] + "_split.pdf"
         new_doc.save(save_path)
-        messagebox.showinfo("成功", "PDF保存成功。")
+        set_status("PDF保存成功。", "green")
     else:
         format_mode_map = {
             '.jpg': 'RGB',
@@ -72,126 +94,103 @@ def save_images(imgs, extension):
         for i, img in enumerate(imgs):
             save_path = os.path.splitext(file_path)[0] + f"_part{i+1}" + extension
             if mode == 'RGB':
-                img.convert("RGB").save(save_path, quality=95)  # 设置质量为95
+                img.convert("RGB").save(save_path, quality=95)
             else:
                 img.save(save_path)
-        messagebox.showinfo("成功", f"图像保存成功，共 {len(imgs)} 个部分。")
+        set_status(f"图像保存成功，共 {len(imgs)} 个部分。", "green")
 
 # 保存文件
 def save_file():
     if not file_path:
-        messagebox.showerror("错误", "没有选择文件。")
+        set_status("错误: 没有选择文件。", "red")
         return
     
     save_extension = save_format_var.get()
-    original_img = get_original_image()
+    original_imgs = imgs
     
     direction = split_direction_var.get()
     
     if direction == '不拆分':
-        imgs = [original_img]
+        imgs_to_save = original_imgs
     else:
-        imgs = split_image(original_img, direction)
+        imgs_to_save = split_image(original_imgs, direction)
     
-    save_images(imgs, save_extension)
-
-# 创建顶部菜单栏
-top_menu = tk.Frame(root, bg='white')
-top_menu.pack(side='top', fill='x')
+    save_images(imgs_to_save, save_extension)
 
 # 打开文件按钮
 def open_file():
-    global file_path, img, file_extension
+    global file_path, imgs, file_extension, total_pages, current_page
     file_path = filedialog.askopenfilename(filetypes=[("图片文件", "*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.tiff;*.gif;*.webp;*.ico")])
     if file_path:
-        file_extension = os.path.splitext(file_path)[1].lower()
-        img = get_original_image()
-        display_image()
+        if os.path.isfile(file_path) and os.access(file_path, os.R_OK):
+            file_extension = os.path.splitext(file_path)[1].lower()
+            supported_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.gif', '.webp', '.ico']
+            if file_extension in supported_extensions:
+                imgs = get_original_image()
+                if file_extension == '.pdf':
+                    doc = fitz.open(file_path)
+                    total_pages = len(doc)
+                    page_spinbox.config(from_=1, to=total_pages)
+                    page_spinbox.config(state='normal')
+                    current_page = 1
+                else:
+                    total_pages = 1
+                    page_spinbox.config(from_=1, to=1)
+                    page_spinbox.config(state='disabled')
+                    current_page = 1
+                display_image()
+                set_status(f"文件已打开: {file_path}", "blue")
+            else:
+                set_status(f"不支持的文件类型: {file_extension}", "red")
+        else:
+            set_status("文件不存在或不可读。", "red")
+    else:
+        set_status("未选择文件。", "orange")
 
-open_button = tk.Button(top_menu, text="打开文件", command=open_file, bg='#4CAF50', fg='white')
-open_button.pack(side='left', padx=10, pady=5)
-
-# 拆分方向下拉菜单
-split_direction_var = tk.StringVar()
-split_direction_var.set('不拆分')  # Set default to '不拆分'
-direction_menu = tk.OptionMenu(
-    top_menu, split_direction_var, '垂直', '水平', '不拆分',
-    command=lambda _: update_split_direction()
-)
-direction_menu.config(bg='white', fg='black')
-direction_menu.pack(side='left', padx=10, pady=5)
-
-# 保存文件格式下拉菜单
-save_format_var = tk.StringVar()
-save_format_var.set('.jpg')
-save_format_menu = tk.OptionMenu(top_menu, save_format_var, '.jpg', '.pdf', '.png', '.bmp', '.tiff', '.webp', '.ico')
-save_format_menu.config(bg='white', fg='black')
-save_format_menu.pack(side='left', padx=10, pady=5)
-
-save_button = tk.Button(top_menu, text="保存文件", command=save_file, bg='#4CAF50', fg='white')
-save_button.pack(side='left', padx=10, pady=5)
-
-# 创建中间控制面板
-control_panel = tk.Frame(root, bg='white')
-control_panel.pack(side='top', fill='x')
-
-# 创建底部预览区域
-preview_frame = tk.Frame(root, bg='#F2F2F2')
-preview_frame.pack(side='bottom', fill='both', expand=True)
-
-# 创建Canvas用于显示图像
-image_canvas = tk.Canvas(preview_frame, bg='#E0E0E0')
-image_canvas.pack(fill='both', expand=True)
-
-# 创建标签用于显示分割百分比
-split_percentage_label = tk.Label(preview_frame, text="分割位置: 50%", bg='#F2F2F2', fg='black')
-split_percentage_label.pack(side='top', pady=5)
+# 更新当前页面
+def update_current_page():
+    global current_page
+    current_page = int(page_spinbox.get())
+    display_image()
+    set_status(f"当前页面: {current_page}/{total_pages}", "blue")
 
 # 显示图像到Canvas
 def display_image():
-    global img
-    if img:
-        image_canvas.delete("all")  # 清空Canvas
+    if imgs:
+        image_canvas.delete("all")
         canvas_width = image_canvas.winfo_width()
         canvas_height = image_canvas.winfo_height()
-        img_width, img_height = img.size
-        # 保持AspectRatio
+        img_to_display = imgs[current_page - 1]
+        img_width, img_height = img_to_display.size
         if img_width / img_height > canvas_width / canvas_height:
             new_width = canvas_width
             new_height = int(new_width * img_height / img_width)
         else:
             new_height = canvas_height
             new_width = int(new_height * img_width / img_height)
-        resized_img = img.resize((new_width, new_height))
+        resized_img = img_to_display.resize((new_width, new_height))
         photo = ImageTk.PhotoImage(resized_img)
         image_canvas.create_image(canvas_width / 2, canvas_height / 2, anchor='center', image=photo)
-        image_canvas.image = photo  # 保持对图像的引用
-        # 绘制分割线
+        image_canvas.image = photo
         draw_split_line()
-
-# 绑定Configure事件到Canvas
-image_canvas.bind("<Configure>", lambda event: display_image())
+        set_status(f"显示页面: {current_page}/{total_pages}", "blue")
+    else:
+        set_status("没有可供显示的图像。", "orange")
 
 # 绘制分割线
 def draw_split_line():
-    image_canvas.delete("split_line")  # 清空之前的分割线
+    image_canvas.delete("split_line")
     canvas_width = image_canvas.winfo_width()
     canvas_height = image_canvas.winfo_height()
     direction = split_direction_var.get()
-    
     if direction == '垂直':
         split_x = int(canvas_width * split_position)
-        image_canvas.create_line(
-            split_x, 0, split_x, canvas_height, fill='red', width=2, tags="split_line"
-        )
+        image_canvas.create_line(split_x, 0, split_x, canvas_height, fill='red', width=2, tags="split_line")
     elif direction == '水平':
         split_y = int(canvas_height * split_position)
-        image_canvas.create_line(
-            0, split_y, canvas_width, split_y, fill='red', width=2, tags="split_line"
-        )
+        image_canvas.create_line(0, split_y, canvas_width, split_y, fill='red', width=2, tags="split_line")
     elif direction == '不拆分':
-        pass  # 不绘制分割线
-    
+        pass
     update_split_percentage_label()
 
 # 更新分割百分比标签
@@ -199,10 +198,12 @@ def update_split_percentage_label():
     split_percentage_label.config(text=f"分割位置: {int(split_position * 100)}%")
 
 # 更新分割方向
-def update_split_direction():
-    global split_direction
-    split_direction = split_direction_var.get()
+def update_split_direction(event=None):
+    direction = split_direction_var.get()
+    if direction == '不拆分':
+        split_position = 0.5
     draw_split_line()
+    set_status(f"分割方向已更改为: {direction}", "blue")
 
 # 拖动分割线
 def drag_split_line(event):
@@ -214,24 +215,109 @@ def drag_split_line(event):
         split_position = max(0, min(1, event.x / canvas_width))
     elif direction == '水平':
         split_position = max(0, min(1, event.y / canvas_height))
-    elif direction == '不拆分':
-        split_position = 0.5  # 重置分割位置
     draw_split_line()
-
-# 绑定拖动事件
-image_canvas.bind("<B1-Motion>", drag_split_line)
+    set_status(f"分割位置已调整为: {int(split_position * 100)}%", "blue")
 
 # 处理拖放文件
 def handle_drop(event):
-    global file_path, img, file_extension
+    global file_path, imgs, file_extension, total_pages, current_page
     file_path = event.data.strip('{}')
     if file_path:
-        file_extension = os.path.splitext(file_path)[1].lower()
-        img = get_original_image()
-        display_image()
+        if os.path.isfile(file_path) and os.access(file_path, os.R_OK):
+            file_extension = os.path.splitext(file_path)[1].lower()
+            supported_extensions = ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.gif', '.webp', '.ico']
+            if file_extension in supported_extensions:
+                imgs = get_original_image()
+                if file_extension == '.pdf':
+                    doc = fitz.open(file_path)
+                    total_pages = len(doc)
+                    page_spinbox.config(from_=1, to=total_pages)
+                    page_spinbox.config(state='normal')
+                    current_page = 1
+                else:
+                    total_pages = 1
+                    page_spinbox.config(from_=1, to=1)
+                    page_spinbox.config(state='disabled')
+                    current_page = 1
+                display_image()
+                set_status(f"文件已打开: {file_path}", "blue")
+            else:
+                set_status(f"不支持的文件类型: {file_extension}", "red")
+        else:
+            set_status("文件不存在或不可读。", "red")
+    else:
+        set_status("未选择文件。", "orange")
 
-# 绑定拖放事件
+# 设置状态栏文本
+def set_status(message, color="black"):
+    status_label.config(text=message, fg=color)
+    root.after(5000, lambda: status_label.config(text="", fg="black"))  # 5秒后清除消息
+
+# 创建 GUI 元件
+
+# 创建顶部菜单栏
+top_menu = tk.Frame(root, bg='white')
+top_menu.grid(row=0, column=0, sticky='ew')
+
+open_button = tk.Button(top_menu, text="打开文件", command=open_file, bg='#4CAF50', fg='white')
+open_button.pack(side='left', padx=10, pady=5)
+
+split_direction_var = tk.StringVar()
+split_direction_var.set('不拆分')
+direction_menu_label = tk.Label(top_menu, text="分割方向:", bg='white', fg='black')
+direction_menu_label.pack(side='left', padx=5)
+direction_menu = tk.OptionMenu(top_menu, split_direction_var, '垂直', '水平', '不拆分', command=update_split_direction)
+direction_menu.config(bg='white', fg='black')
+direction_menu.pack(side='left', padx=10, pady=5)
+
+save_format_var = tk.StringVar()
+save_format_var.set('.jpg')
+save_format_label = tk.Label(top_menu, text="保存格式:", bg='white', fg='black')
+save_format_label.pack(side='left', padx=5)
+save_format_menu = tk.OptionMenu(top_menu, save_format_var, '.jpg', '.pdf', '.png', '.bmp', '.tiff', '.webp', '.ico')
+save_format_menu.config(bg='white', fg='black')
+save_format_menu.pack(side='left', padx=10, pady=5)
+
+save_button = tk.Button(top_menu, text="保存文件", command=save_file, bg='#4CAF50', fg='white')
+save_button.pack(side='left', padx=10, pady=5)
+
+# 创建底部预览区域
+preview_frame = tk.Frame(root, bg='#F2F2F2')
+preview_frame.grid(row=1, column=0, sticky='nsew')
+
+# 放置“分割位置”标签在顶部
+split_percentage_label = tk.Label(preview_frame, text="分割位置: 50%", bg='#F2F2F2', fg='black')
+split_percentage_label.pack(side='top', pady=5)
+
+# 放置图像画布在中间，并设置其可扩展
+image_canvas = tk.Canvas(preview_frame, bg='#E0E0E0')
+image_canvas.pack(side='top', fill='both', expand=True)
+
+# 创建一个新的框架用于页面控制，并在底部居中放置
+page_control_frame = tk.Frame(preview_frame, bg='#F2F2F2')
+page_control_frame.pack(side='bottom', pady=5, anchor='center')
+
+# 在page_control_frame内部使用pack布局
+page_label = tk.Label(page_control_frame, text="当前页面：", bg='#F2F2F2', fg='black')
+page_label.pack(side='left', padx=5)
+
+page_spinbox = tk.Spinbox(page_control_frame, from_=1, to=1, command=update_current_page, width=5)
+page_spinbox.pack(side='left', padx=5)
+
+# 绑定事件
+image_canvas.bind("<Configure>", lambda event: display_image())
+image_canvas.bind("<B1-Motion>", drag_split_line)
+
+# 处理拖放文件
 root.drop_target_register(DND_FILES)
 root.dnd_bind('<<Drop>>', handle_drop)
 
+# 添加状态栏
+status_bar = tk.Frame(root, bg='#F2F2F2', relief='sunken', bd=1)
+status_bar.grid(row=2, column=0, sticky='ew')
+
+status_label = tk.Label(status_bar, text="", bg='#F2F2F2', fg='black', anchor='w', padx=5)
+status_label.pack(side='left', fill='x', expand=True)
+
+# 进入主循环
 root.mainloop()
