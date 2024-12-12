@@ -7,7 +7,7 @@ import io
 from tkinterdnd2 import TkinterDnD, DND_FILES
 
 root = TkinterDnD.Tk()
-root.title("Image Splitter v1.1 —— QwejayHuang")
+root.title("Image Splitter v1.2 —— QwejayHuang")
 
 # 设置 grid 布局权重
 root.grid_rowconfigure(0, weight=0)
@@ -64,56 +64,26 @@ def split_image(imgs, direction):
 # 保存图像
 def save_images(imgs, extension):
     selected_dpi = dpi_var.get()
-    if extension == '.pdf':
-        new_doc = fitz.open()
-        for img in imgs:
-            original_dpi = img.info.get('dpi', (300, 300))
-            if isinstance(original_dpi, (list, tuple)):
-                original_dpi_width = original_dpi[0]
-                original_dpi_height = original_dpi[1]
-            else:
-                original_dpi_width = original_dpi
-                original_dpi_height = original_dpi
-            img_rgb = img.convert("RGB")
-            img_rgb = img.resize((int(img.width * selected_dpi / original_dpi_width),
-                                  int(img.height * selected_dpi / original_dpi_height)))
-            with io.BytesIO() as output:
-                img_rgb.save(output, format="JPEG", quality=85)
-                image_bytes = output.getvalue()
-            width = img_rgb.width / (selected_dpi / 72)
-            height = img_rgb.height / (selected_dpi / 72)
-            page = new_doc.new_page(width=width, height=height)
-            page.insert_image(fitz.Rect(0, 0, width, height), stream=image_bytes)
-        save_path = os.path.splitext(file_path)[0] + "_split.pdf"
-        new_doc.save(save_path)
-        set_status("PDF保存成功。", "green")
-    else:
-        format_mode_map = {
-            '.jpg': 'RGB',
-            '.jpeg': 'RGB',
-            '.png': 'RGBA',
-            '.bmp': 'RGBA',
-            '.tiff': 'RGBA',
-            '.webp': 'RGBA',
-            '.ico': 'RGBA',
-        }
-        mode = format_mode_map.get(extension.lower(), 'RGBA')
-        for i, img in enumerate(imgs):
-            original_dpi = img.info.get('dpi', (300, 300))
-            if isinstance(original_dpi, (list, tuple)):
-                original_dpi_width = original_dpi[0]
-                original_dpi_height = original_dpi[1]
-            else:
-                original_dpi_width = original_dpi
-                original_dpi_height = original_dpi
-            img = img.resize((int(img.width * selected_dpi / original_dpi_width),
-                              int(img.height * selected_dpi / original_dpi_height)))
+    for i, img in enumerate(imgs):
+        if selected_dpi == "默认":
+            # 直接保存图片，不进行缩放
             save_path = os.path.splitext(file_path)[0] + f"_part{i+1}" + extension
-            if mode == 'RGB':
-                img.convert("RGB").save(save_path, quality=95)
+            img.save(save_path)
+        else:
+            # 转换 selected_dpi 为整数
+            dpi = int(selected_dpi)
+            original_dpi = img.info.get('dpi', (300, 300))
+            if isinstance(original_dpi, (list, tuple)):
+                original_dpi_width = original_dpi[0]
+                original_dpi_height = original_dpi[1]
             else:
-                img.save(save_path)
-        set_status(f"图像保存成功，共 {len(imgs)} 个部分。", "green")
+                original_dpi_width = original_dpi
+                original_dpi_height = original_dpi
+            img = img.resize((int(img.width * dpi / original_dpi_width),
+                              int(img.height * dpi / original_dpi_height)))
+            save_path = os.path.splitext(file_path)[0] + f"_part{i+1}" + extension
+            img.save(save_path)
+    set_status(f"图像保存成功，共 {len(imgs)} 个部分。", "green")
 
 # 保存文件
 def save_file():
@@ -190,7 +160,9 @@ def display_image():
         photo = ImageTk.PhotoImage(resized_img)
         image_canvas.create_image(canvas_width / 2, canvas_height / 2, anchor='center', image=photo)
         image_canvas.image = photo
-        draw_split_line()
+        direction = split_direction_var.get()
+        if direction != '不分割':
+            draw_split_line()
         update_split_percentage_label()
     else:
         set_status("没有可供显示的图像。", "orange")
@@ -207,24 +179,26 @@ def draw_split_line():
     elif direction == '水平':
         split_y = int(canvas_height * split_position)
         image_canvas.create_line(0, split_y, canvas_width, split_y, fill='red', width=2, tags="split_line")
-    elif direction == '不分割':
-        pass
-    update_split_percentage_label()
 
 # 更新分割百分比标签
 def update_split_percentage_label():
     split_percentage_label.config(text=f"分割位置: {int(split_position * 100)}%")
 
 # 更新分割方向
-def update_split_direction(event=None):
+def update_split_direction(*args):
     direction = split_direction_var.get()
     if direction == '不分割':
         split_position = 0.5
+        split_percentage_label.pack_forget()  # 隐藏分割位置百分比标签
+    else:
+        split_percentage_label.pack(side='top', pady=5)  # 显示分割位置百分比标签
     draw_split_line()
     set_status(f"分割方向已更改为: {direction}", "blue")
 
 # 拖动分割线
 def drag_split_line(event):
+    if split_direction_var.get() == '不分割':
+        return
     global split_position
     canvas_width = image_canvas.winfo_width()
     canvas_height = image_canvas.winfo_height()
@@ -234,6 +208,7 @@ def drag_split_line(event):
     elif direction == '水平':
         split_position = max(0, min(1, event.y / canvas_height))
     draw_split_line()
+    update_split_percentage_label()
     set_status(f"分割位置已调整为: {int(split_position * 100)}%", "blue")
 
 # 处理拖放文件
@@ -273,29 +248,35 @@ def set_status(message, color="black"):
     root.after(5000, lambda: status_label.config(text="", fg="black"))  # 5秒后清除消息
 
 # 计算图像大小预估
-def estimate_size(img, dpi, extension):
+def estimate_size(img, dpi_setting, extension):
     width, height = img.size
-    # 获取原始DPI
-    original_dpi = img.info.get('dpi', (300, 300))
-    if isinstance(original_dpi, (list, tuple)):
-        original_dpi_width = original_dpi[0]
-        original_dpi_height = original_dpi[1]
+    if dpi_setting == "默认":
+        # 使用原始大小进行预估
+        pixel_count = width * height * 3
     else:
-        original_dpi_width = original_dpi
-        original_dpi_height = original_dpi
-    # 计算调整后的像素数量
-    new_width = int(width * dpi / original_dpi_width)
-    new_height = int(height * dpi / original_dpi_height)
-    # 假设RGB图像，每个像素3字节，压缩率根据格式不同而不同
-    pixel_count = new_width * new_height * 3
+        # 转换 selected_dpi 为整数
+        dpi = int(dpi_setting)
+        original_dpi = img.info.get('dpi', (300, 300))
+        if isinstance(original_dpi, (list, tuple)):
+            original_dpi_width = original_dpi[0]
+            original_dpi_height = original_dpi[1]
+        else:
+            original_dpi_width = original_dpi
+            original_dpi_height = original_dpi
+        new_width = int(width * dpi / original_dpi_width)
+        new_height = int(height * dpi / original_dpi_height)
+        pixel_count = new_width * new_height * 3
+
+    # 根据格式计算压缩后的文件大小
     if extension.lower() in ['.jpg', '.jpeg']:
         compressed_size = pixel_count / 10  # 假设JPEG压缩率为10倍
     elif extension.lower() == '.png':
         compressed_size = pixel_count / 3  # 假设PNG压缩率为3倍
     elif extension.lower() == '.bmp':
-        compressed_size = pixel_count
+        compressed_size = pixel_count  # 无压缩
     else:
         compressed_size = pixel_count / 5  # 其他格式假设压缩率为5倍
+
     return compressed_size
 
 # 更新状态栏显示预估大小
@@ -315,7 +296,11 @@ def update_estimated_size(*args):
 # 更新DPI选择时更新预估大小
 def update_dpi(*args):
     update_estimated_size()
-    set_status(f"DPI设置为: {dpi_var.get()}", "blue")
+    selected_dpi = dpi_var.get()
+    if selected_dpi == "默认":
+        set_status("DPI设置为: 默认", "blue")
+    else:
+        set_status(f"DPI设置为: {selected_dpi}", "blue")
 
 # 创建 GUI 元件
 
@@ -328,6 +313,7 @@ open_button.pack(side='left', padx=10, pady=5)
 
 split_direction_var = tk.StringVar()
 split_direction_var.set('不分割')
+split_direction_var.trace('w', update_split_direction)
 direction_menu_label = tk.Label(top_menu, text="分割方向:", bg='white', fg='black')
 direction_menu_label.pack(side='left', padx=5)
 direction_menu = tk.OptionMenu(top_menu, split_direction_var, '垂直', '水平', '不分割', command=update_split_direction)
@@ -343,11 +329,11 @@ save_format_menu.config(bg='white', fg='black')
 save_format_menu.pack(side='left', padx=10, pady=5)
 
 # DPI选项
-dpi_var = tk.IntVar()
-dpi_var.set(150)  # 默认DPI
+dpi_var = tk.StringVar()
+dpi_var.set("默认")  # Set default to "默认"
 dpi_label = tk.Label(top_menu, text="保存DPI:", bg='white', fg='black')
 dpi_label.pack(side='left', padx=5)
-dpi_menu = tk.OptionMenu(top_menu, dpi_var, 72, 150, 300, 600, command=update_dpi)
+dpi_menu = tk.OptionMenu(top_menu, dpi_var, "默认", "72", "150", "300", "600", command=update_dpi)
 dpi_menu.config(bg='white', fg='black')
 dpi_menu.pack(side='left', padx=10, pady=5)
 
@@ -395,6 +381,9 @@ status_bar.grid(row=2, column=0, sticky='ew')
 
 status_label = tk.Label(status_bar, text="", bg='#F2F2F2', fg='black', anchor='w', padx=5)
 status_label.pack(side='left', fill='x', expand=True)
+
+# 设置初始状态
+update_split_direction()
 
 # 进入主循环
 root.mainloop()
