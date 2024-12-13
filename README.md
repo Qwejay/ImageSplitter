@@ -80,3 +80,15 @@ Image Splitter 是一个图像拆分（按比例切成2个图片）小工具，�
 - **文件大小预估**：在保存文件时显示预估文件大小。
 - **DPI选择**：导出文件时可选择多种DPI选项。
 
+## Image Splitter v1.3
+
+**发布日期**: 2024-12-13
+### 新增功能
+- **自动检测图片方向并设置默认分割线**
+- **增加多宫格裁切**：可以自定义图片裁切块数，默认九宫格。
+- **修复分割线超出图片边界**：现在分割线可正确显示在图片内。
+
+**打包命令**
+
+pyinstaller --onefile --windowed --icon=icon.ico --add-data "tkdnd;tkdnd" ImageSplitter.py
+
