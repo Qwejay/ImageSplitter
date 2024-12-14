@@ -25,6 +25,8 @@
 ### 用户友好界面
 - 简洁直观的用户界面，易于上手。
 
+### 下载地址：https://github.com/Qwejay/ImageSplitter/releases
+
 ## 版本历史
 
 ### Image Splitter v1.1
