@@ -6,6 +6,7 @@ import os
 import math
 import threading
 from tkinterdnd2 import TkinterDnD, DND_FILES
+import webbrowser
 
 root = TkinterDnD.Tk()
 root.geometry("740x640")
@@ -261,7 +262,7 @@ def update_split_direction(*args):
         split_percentage_label.pack(side='top', pady=5)
         image_canvas.bind("<B1-Motion>", drag_split_line)
     draw_split_line()
-    set_status(f"分割方向已更改为: {direction}", "blue")
+    set_status(f"分割类型已更改为: {direction}", "blue")
 
 def drag_split_line(event):
     direction = split_direction_var.get()
@@ -300,7 +301,7 @@ def set_status(message, color="black"):
     root.after(5000, lambda: status_label.config(text="", fg="black"))
 
 def update_dpi_state(*args):
-    dpi_menu.config(state='normal')  # 始终启用DPI设置
+    dpi_menu.config(state='normal')
 
 def validate_grid_input(new_value):
     if new_value == "":
@@ -329,8 +330,10 @@ def auto_detect_split_direction():
             split_direction_var.set('水平')
         update_split_direction()
 
-# 创建 GUI 元件
+def open_update_link():
+    webbrowser.open("https://github.com/Qwejay/ImageSplitter")
 
+# 创建 GUI 元件
 top_menu = tk.Frame(root, bg='white')
 top_menu.grid(row=0, column=0, sticky='ew')
 
@@ -340,7 +343,7 @@ open_button.pack(side='left', padx=10, pady=5)
 split_direction_var = tk.StringVar()
 split_direction_var.set('不分割')
 split_direction_var.trace('w', update_split_direction)
-direction_menu_label = tk.Label(top_menu, text="分割方向:", bg='white', fg='black')
+direction_menu_label = tk.Label(top_menu, text="分割类型:", bg='white', fg='black')
 direction_menu_label.pack(side='left', padx=5)
 direction_menu = tk.OptionMenu(top_menu, split_direction_var, '不分割', '垂直', '水平', '多宫格')
 direction_menu.config(bg='white', fg='black')
@@ -403,6 +406,10 @@ status_bar.grid(row=2, column=0, sticky='ew')
 
 status_label = tk.Label(status_bar, text="", bg='#F2F2F2', fg='black', anchor='w', padx=5)
 status_label.pack(side='left', fill='x', expand=True)
+
+update_link = tk.Label(status_bar, text="检查更新", bg='#F2F2F2', fg='blue', cursor="hand2")
+update_link.pack(side='right', padx=5)
+update_link.bind("<Button-1>", lambda e: open_update_link())
 
 update_split_direction()
 
