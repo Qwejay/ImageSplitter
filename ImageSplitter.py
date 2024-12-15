@@ -9,6 +9,8 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 import webbrowser
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+from PIL import Image
+import pillow_heif
 
 # 全局变量
 file_path = ""
@@ -28,22 +30,6 @@ img_display_width = 0
 img_display_height = 0
 
 # 函数定义
-
-def get_original_image(file_path, file_extension):
-    """加载原始图像或 PDF 页面"""
-    if file_extension == '.pdf':
-        doc = fitz.open(file_path)
-        images = []
-        for page in doc:
-            pix = page.get_pixmap(alpha=True, dpi=150)
-            img_rgba = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
-            img_white = Image.new("RGB", img_rgba.size, (255, 255, 255))
-            img_rgb = Image.alpha_composite(img_white.convert("RGBA"), img_rgba).convert('RGB')
-            images.append(img_rgb)
-        return images
-    else:
-        return [Image.open(file_path).convert("RGB")]
-
 def split_image(imgs, direction, grid_num=1):
     """根据方向分割图像"""
     split_imgs = []
@@ -87,10 +73,12 @@ def split_image(imgs, direction, grid_num=1):
 
 def convert_image_mode(img, extension):
     """根据文件扩展名转换图像模式"""
-    if extension.lower() in ['.jpg', '.jpeg', '.bmp', '.webp']:
+    if extension.lower() in ['.jpg', '.jpeg', '.bmp', '.webp', '.heic']:
         return img.convert("RGB")
     elif extension.lower() == '.png':
         return img.convert("RGBA")
+    elif extension.lower() == '.heic':
+        return img.convert("RGB")  # HEIC 格式需要 RGB 模式
     return img
 
 def save_images(imgs, extension):
@@ -110,12 +98,19 @@ def save_images(imgs, extension):
             img = convert_image_mode(img, extension)  # 转换图像模式
             if extension.lower() in ['.pdf']:
                 img.save(save_path, dpi=(dpi, dpi))  # 保存 PDF 时设置 DPI
+            elif extension.lower() == '.heic':
+                # 保存 HEIC 格式
+                pillow_heif.from_pillow(img).save(save_path)
             else:
                 img.save(save_path)  # 保存其他格式
         else:
             # 如果 DPI 为默认，直接保存图像
             img = convert_image_mode(img, extension)  # 转换图像模式
-            img.save(save_path)
+            if extension.lower() == '.heic':
+                # 保存 HEIC 格式
+                pillow_heif.from_pillow(img).save(save_path)
+            else:
+                img.save(save_path)
 
     set_status(f"图像保存成功，共 {len(imgs)} 个部分。", "success")
 
@@ -157,10 +152,10 @@ def load_file_in_background(file_path, file_extension):
 def open_file():
     """打开文件"""
     global file_path, file_extension
-    file_path = filedialog.askopenfilename(filetypes=[("图片文件", "*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.webp")])
+    file_path = filedialog.askopenfilename(filetypes=[("图片文件", "*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.heic")])
     if file_path:
         file_extension = os.path.splitext(file_path)[1].lower()
-        if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp']:
+        if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
             threading.Thread(target=load_file_in_background, args=(file_path, file_extension), daemon=True).start()
         else:
             set_status(f"不支持的文件类型: {file_extension}", "danger")
@@ -264,7 +259,7 @@ def handle_drop(event):
     global file_path, file_extension
     file_path = event.data.strip('{}').split()[0]
     file_extension = os.path.splitext(file_path)[1].lower()
-    if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp']:
+    if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
         threading.Thread(target=load_file_in_background, args=(file_path, file_extension), daemon=True).start()
     else:
         set_status(f"不支持的文件类型: {file_extension}", "danger")
@@ -278,6 +273,33 @@ def update_grid_lines(event):
         draw_split_line()  # 重新绘制分割线
     except ValueError:
         set_status("宫格数必须为大于等于1的整数。", "danger")
+
+def get_original_image(file_path, file_extension):
+    """加载原始图像或 PDF 页面"""
+    if file_extension == '.heic':
+        # 使用 pillow-heif 读取 HEIC 文件
+        heif_file = pillow_heif.read_heif(file_path)
+        img = Image.frombytes(
+            heif_file.mode,
+            heif_file.size,
+            heif_file.data,
+            "raw",
+            heif_file.mode,
+            heif_file.stride,
+        )
+        return [img.convert("RGB")]
+    elif file_extension == '.pdf':
+        doc = fitz.open(file_path)
+        images = []
+        for page in doc:
+            pix = page.get_pixmap(alpha=True, dpi=150)
+            img_rgba = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
+            img_white = Image.new("RGB", img_rgba.size, (255, 255, 255))
+            img_rgb = Image.alpha_composite(img_white.convert("RGBA"), img_rgba).convert('RGB')
+            images.append(img_rgb)
+        return images
+    else:
+        return [Image.open(file_path).convert("RGB")]
 
 def open_update_link():
     """打开更新链接"""
@@ -343,7 +365,7 @@ save_format_var = tk.StringVar()
 save_format_var.set('.jpg')
 save_format_label = ttk.Label(top_menu, text="保存格式:", bootstyle="secondary")
 save_format_label.pack(side=LEFT, padx=5)
-save_format_menu = ttk.OptionMenu(top_menu, save_format_var, '.JPG', '.JPG', '.PDF', '.PNG', '.BMP', '.WEBP')
+save_format_menu = ttk.OptionMenu(top_menu, save_format_var, '.JPG', '.JPG', '.PDF', '.PNG', '.BMP', '.WEBP', '.HEIC')
 save_format_menu.pack(side=LEFT, padx=10, pady=5)
 
 dpi_var = tk.StringVar()
