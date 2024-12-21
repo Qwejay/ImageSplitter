@@ -88,8 +88,11 @@ def save_images(imgs, extension):
         save_path = os.path.splitext(file_path)[0] + f"_part{i+1}" + extension
 
         if selected_dpi != "默认":
-            # 如果选择了 DPI，调整图像大小
-            dpi = int(selected_dpi)
+            try:
+                dpi = int(selected_dpi)
+            except ValueError:
+                set_status("DPI必须为整数或'默认'。", "danger")
+                continue
             original_dpi = img.info.get('dpi', (300, 300))  # 默认假设原始 DPI 为 300
             scaling_factor = dpi / original_dpi[0]  # 计算缩放比例
             new_width = int(img.width * scaling_factor)
@@ -102,7 +105,7 @@ def save_images(imgs, extension):
                 # 保存 HEIC 格式
                 pillow_heif.from_pillow(img).save(save_path)
             else:
-                img.save(save_path)  # 保存其他格式
+                img.save(save_path, dpi=(dpi, dpi))  # 保存其他格式时设置 DPI
         else:
             # 如果 DPI 为默认，直接保存图像
             img = convert_image_mode(img, extension)  # 转换图像模式
@@ -110,8 +113,7 @@ def save_images(imgs, extension):
                 # 保存 HEIC 格式
                 pillow_heif.from_pillow(img).save(save_path)
             else:
-                img.save(save_path)
-
+                img.save(save_path)  # 保存其他格式
     set_status(f"图像保存成功，共 {len(imgs)} 个部分。", "success")
 
 def save_file():
@@ -254,10 +256,11 @@ def drag_split_line(event):
     draw_split_line()
     set_status(f"分割位置已调整为: {int(split_position * 100)}%", "info")
 
-def handle_drop(event):
+def on_drop(event):
     """处理拖放文件"""
     global file_path, file_extension
-    file_path = event.data.strip('{}').split()[0]
+    # 移除 split()，直接使用 strip('{}')
+    file_path = event.data.strip('{}')
     file_extension = os.path.splitext(file_path)[1].lower()
     if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
         threading.Thread(target=load_file_in_background, args=(file_path, file_extension), daemon=True).start()
@@ -291,8 +294,14 @@ def get_original_image(file_path, file_extension):
     elif file_extension == '.pdf':
         doc = fitz.open(file_path)
         images = []
+        # 获取当前选择的DPI，如果没有选择则使用默认DPI
+        selected_dpi = dpi_var.get()
+        if selected_dpi == "默认":
+            dpi_value = 300  # 默认DPI
+        else:
+            dpi_value = int(selected_dpi)
         for page in doc:
-            pix = page.get_pixmap(alpha=True, dpi=150)
+            pix = page.get_pixmap(dpi=dpi_value, alpha=True)
             img_rgba = Image.frombytes("RGBA", [pix.width, pix.height], pix.samples)
             img_white = Image.new("RGB", img_rgba.size, (255, 255, 255))
             img_rgb = Image.alpha_composite(img_white.convert("RGBA"), img_rgba).convert('RGB')
@@ -332,7 +341,7 @@ def vertical_flip():
 # 创建主窗口
 root = TkinterDnD.Tk()
 root.geometry("820x640")
-root.title("Image Splitter v1.4 —— QwejayHuang")
+root.title("Image Splitter v1.5 —— QwejayHuang")
 
 # 初始化 ttkbootstrap 样式
 style = ttk.Style("litera")
@@ -368,12 +377,19 @@ save_format_label.pack(side=LEFT, padx=5)
 save_format_menu = ttk.OptionMenu(top_menu, save_format_var, '.JPG', '.JPG', '.PDF', '.PNG', '.BMP', '.WEBP', '.HEIC')
 save_format_menu.pack(side=LEFT, padx=10, pady=5)
 
+# 创建dpi变量
 dpi_var = tk.StringVar()
 dpi_var.set("默认")
+
+# 创建dpi标签
 dpi_label = ttk.Label(top_menu, text="保存DPI:", bootstyle="secondary")
 dpi_label.pack(side=LEFT, padx=5)
-dpi_menu = ttk.OptionMenu(top_menu, dpi_var, "默认", "72", "150", "300", "默认")
-dpi_menu.pack(side=LEFT, padx=10, pady=5)
+
+# 创建Combobox
+dpi_combobox = ttk.Combobox(top_menu, textvariable=dpi_var, values=["默认", "72", "150", "300"], width=5)
+dpi_combobox.pack(side=LEFT, padx=10, pady=5)
+dpi_combobox.bind("<<ComboboxSelected>>", lambda event: set_status(f"DPI设置为: {dpi_var.get()}", "info"))
+dpi_combobox.bind("<FocusOut>", lambda event: set_status(f"DPI设置为: {dpi_var.get()}", "info"))
 
 save_button = ttk.Button(top_menu, text="保存文件", command=save_file, bootstyle="primary")
 save_button.pack(side=LEFT, padx=10, pady=5)
@@ -439,7 +455,7 @@ update_link.bind("<Button-1>", lambda e: open_update_link())
 
 # 绑定拖放事件
 root.drop_target_register(DND_FILES)
-root.dnd_bind('<<Drop>>', handle_drop)
+root.dnd_bind('<<Drop>>', on_drop)
 
 # 绑定宫格数量输入框的值变化事件
 grid_entry.bind('<KeyRelease>', update_grid_lines)
