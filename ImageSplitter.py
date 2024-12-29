@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox
+from tkinter import filedialog
 from PIL import Image, ImageTk
 import fitz  # PyMuPDF
 import os
@@ -9,7 +9,6 @@ from tkinterdnd2 import TkinterDnD, DND_FILES
 import webbrowser
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
-from PIL import Image
 import pillow_heif
 
 # 全局变量
@@ -23,29 +22,39 @@ current_page = 1
 total_pages = 1
 split_percentage_label = None
 window_resize_id = None
-grid_entry = None  # 修复 grid_entry 未定义的问题
+grid_row_entry = None
+grid_col_entry = None
 img_display_x = 0
 img_display_y = 0
 img_display_width = 0
 img_display_height = 0
+split_color_var = None
+
+# 颜色映射字典
+color_mapping = {
+    '红色': 'red',
+    '蓝色': 'blue',
+    '绿色': 'green',
+    '黑色': 'black',
+    '黄色': 'yellow'
+}
 
 # 函数定义
-def split_image(imgs, direction, grid_num=1):
+def split_image(imgs, direction, grid_row=1, grid_col=1):
     """根据方向分割图像"""
     split_imgs = []
     if direction == '多宫格':
         try:
-            grid_num = int(grid_num)
-            if grid_num < 1:
+            grid_row = int(grid_row_entry.get())
+            grid_col = int(grid_col_entry.get())
+            if grid_row < 1 or grid_col < 1:
                 raise ValueError
-            rows = int(math.ceil(math.sqrt(grid_num)))
-            cols = int(math.ceil(grid_num / rows))
             for img in imgs:
                 img_width, img_height = img.size
-                cell_width = img_width // cols
-                cell_height = img_height // rows
-                for r in range(rows):
-                    for c in range(cols):
+                cell_width = img_width // grid_col
+                cell_height = img_height // grid_row
+                for r in range(grid_row):
+                    for c in range(grid_col):
                         left = c * cell_width
                         upper = r * cell_height
                         right = left + cell_width
@@ -53,20 +62,46 @@ def split_image(imgs, direction, grid_num=1):
                         split_img = img.crop((left, upper, right, lower))
                         split_imgs.append(split_img)
         except ValueError:
-            set_status("宫格数必须为大于等于1的整数。", "danger")
+            set_status("行数和列数必须为大于等于1的整数。", "danger")
             return split_imgs
     elif direction == '垂直':
-        for img in imgs:
-            split_width = int(img.width * split_position)
-            left_img = img.crop((0, 0, split_width, img.height))
-            right_img = img.crop((split_width, 0, img.width, img.height))
-            split_imgs.extend([left_img, right_img])
+        try:
+            grid_col = int(grid_col_entry.get())
+            if grid_col < 1:
+                raise ValueError
+            for img in imgs:
+                img_width, img_height = img.size
+                cell_width = img_width // grid_col
+                cell_height = img_height
+                for c in range(grid_col):
+                    left = c * cell_width
+                    upper = 0
+                    right = left + cell_width
+                    lower = img_height
+                    split_img = img.crop((left, upper, right, lower))
+                    split_imgs.append(split_img)
+        except ValueError:
+            set_status("列数必须为大于等于1的整数。", "danger")
+            return split_imgs
     elif direction == '水平':
-        for img in imgs:
-            split_height = int(img.height * split_position)
-            top_img = img.crop((0, 0, img.width, split_height))
-            bottom_img = img.crop((0, split_height, img.width, img.height))
-            split_imgs.extend([top_img, bottom_img])
+        try:
+            grid_row = int(grid_row_entry.get())
+            if grid_row < 1:
+                raise ValueError
+            for img in imgs:
+                img_width, img_height = img.size
+                cell_width = img_width
+                cell_height = img_height // grid_row
+                for r in range(grid_row):
+                    left = 0
+                    upper = r * cell_height
+                    right = img_width
+                    lower = upper + cell_height
+                    split_img = img.crop((left, upper, right, lower))
+                    split_imgs.append(split_img)
+        except ValueError:
+            set_status("行数必须为大于等于1的整数。", "danger")
+            return split_imgs
     elif direction == '不分割':
         split_imgs.extend(imgs)
     return split_imgs
@@ -123,16 +158,34 @@ def save_file():
         return
     save_extension = save_format_var.get()
     direction = split_direction_var.get()
-    grid_num = grid_entry.get()
+    grid_row = grid_row_entry.get()
+    grid_col = grid_col_entry.get()
     if direction == '多宫格':
         try:
-            grid_num = int(grid_num)
-            if grid_num < 1:
+            grid_row = int(grid_row)
+            grid_col = int(grid_col)
+            if grid_row < 1 or grid_col < 1:
                 raise ValueError
         except ValueError:
-            set_status("宫格数必须为大于等于1的整数。", "danger")
+            set_status("行数和列数必须为大于等于1的整数。", "danger")
             return
-    imgs_to_save = split_image(imgs, direction, grid_num)
+    elif direction == '垂直':
+        try:
+            grid_col = int(grid_col)
+            if grid_col < 1:
+                raise ValueError
+        except ValueError:
+            set_status("列数必须为大于等于1的整数。", "danger")
+            return
+    elif direction == '水平':
+        try:
+            grid_row = int(grid_row)
+            if grid_row < 1:
+                raise ValueError
+        except ValueError:
+            set_status("行数必须为大于等于1的整数。", "danger")
+            return
+    imgs_to_save = split_image(imgs, direction, grid_row, grid_col)
     save_images(imgs_to_save, save_extension)
 
 def load_file_in_background(file_path, file_extension):
@@ -199,27 +252,48 @@ def draw_split_line():
     image_canvas.delete("split_line")
     if imgs:
         direction = split_direction_var.get()
+        selected_color = split_color_var.get()  # 获取选择的中文颜色
+        color = color_mapping.get(selected_color, 'red')  # 获取对应的英文颜色
         if direction == '多宫格':
             try:
-                grid_num = int(grid_entry.get())
-                rows = int(math.ceil(math.sqrt(grid_num)))
-                cols = int(math.ceil(grid_num / rows))
-                cell_width = img_display_width / cols
-                cell_height = img_display_height / rows
-                for i in range(1, cols):
+                grid_row = int(grid_row_entry.get())
+                grid_col = int(grid_col_entry.get())
+                if grid_row < 1 or grid_col < 1:
+                    raise ValueError
+                cell_width = img_display_width / grid_col
+                cell_height = img_display_height / grid_row
+                for i in range(1, grid_col):
                     split_x = img_display_x + cell_width * i
-                    image_canvas.create_line(split_x, img_display_y, split_x, img_display_y + img_display_height, fill='red', width=2, tags="split_line")
-                for j in range(1, rows):
+                    image_canvas.create_line(split_x, img_display_y, split_x, img_display_y + img_display_height, fill=color, width=2, tags="split_line")
+                for j in range(1, grid_row):
                     split_y = img_display_y + cell_height * j
-                    image_canvas.create_line(img_display_x, split_y, img_display_x + img_display_width, split_y, fill='red', width=2, tags="split_line")
+                    image_canvas.create_line(img_display_x, split_y, img_display_x + img_display_width, split_y, fill=color, width=2, tags="split_line")
             except ValueError:
                 pass
         elif direction == '垂直':
-            split_x = img_display_x + img_display_width * split_position
-            image_canvas.create_line(split_x, img_display_y, split_x, img_display_y + img_display_height, fill='red', width=2, tags="split_line")
+            try:
+                grid_col = int(grid_col_entry.get())
+                if grid_col < 1:
+                    raise ValueError
+                cell_width = img_display_width / grid_col
+                for i in range(1, grid_col):
+                    split_x = img_display_x + cell_width * i
+                    image_canvas.create_line(split_x, img_display_y, split_x, img_display_y + img_display_height, fill=color, width=2, tags="split_line")
+            except ValueError:
+                pass
         elif direction == '水平':
-            split_y = img_display_y + img_display_height * split_position
-            image_canvas.create_line(img_display_x, split_y, img_display_x + img_display_width, split_y, fill='red', width=2, tags="split_line")
+            try:
+                grid_row = int(grid_row_entry.get())
+                if grid_row < 1:
+                    raise ValueError
+                cell_height = img_display_height / grid_row
+                for j in range(1, grid_row):
+                    split_y = img_display_y + cell_height * j
+                    image_canvas.create_line(img_display_x, split_y, img_display_x + img_display_width, split_y, fill=color, width=2, tags="split_line")
+            except ValueError:
+                pass
+        elif direction == '不分割':
+            pass
 
 def set_status(message, color="secondary"):
     """设置状态栏信息"""
@@ -228,19 +302,35 @@ def set_status(message, color="secondary"):
 
 def update_split_direction(*args):
     """更新分割方向"""
-    global image_canvas, grid_entry  # 声明全局变量
+    global image_canvas, grid_row_entry, grid_col_entry
     direction = split_direction_var.get()
-    if direction in ['垂直', '水平']:
-        if grid_entry:
-            grid_entry['state'] = 'disabled'
+    if direction == '垂直':
+        grid_row_entry.delete(0, tk.END)
+        grid_row_entry.insert(0, "1")
+        grid_row_entry['state'] = 'disabled'
+        grid_col_entry.delete(0, tk.END)
+        grid_col_entry.insert(0, "2")
+        grid_col_entry['state'] = 'normal'
+        image_canvas.bind("<B1-Motion>", drag_split_line)
+    elif direction == '水平':
+        grid_row_entry.delete(0, tk.END)
+        grid_row_entry.insert(0, "2")
+        grid_row_entry['state'] = 'normal'
+        grid_col_entry.delete(0, tk.END)
+        grid_col_entry.insert(0, "1")
+        grid_col_entry['state'] = 'disabled'
         image_canvas.bind("<B1-Motion>", drag_split_line)
     elif direction == '多宫格':
-        if grid_entry:
-            grid_entry['state'] = 'normal'
+        grid_row_entry.delete(0, tk.END)
+        grid_row_entry.insert(0, "3")
+        grid_row_entry['state'] = 'normal'
+        grid_col_entry.delete(0, tk.END)
+        grid_col_entry.insert(0, "3")
+        grid_col_entry['state'] = 'normal'
         image_canvas.unbind("<B1-Motion>")
     else:
-        if grid_entry:
-            grid_entry['state'] = 'disabled'
+        grid_row_entry['state'] = 'disabled'
+        grid_col_entry['state'] = 'disabled'
         image_canvas.unbind("<B1-Motion>")
     draw_split_line()
 
@@ -259,7 +349,6 @@ def drag_split_line(event):
 def on_drop(event):
     """处理拖放文件"""
     global file_path, file_extension
-    # 移除 split()，直接使用 strip('{}')
     file_path = event.data.strip('{}')
     file_extension = os.path.splitext(file_path)[1].lower()
     if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
@@ -270,12 +359,13 @@ def on_drop(event):
 def update_grid_lines(event):
     """当宫格数量变化时，更新分割线"""
     try:
-        grid_num = int(grid_entry.get())
-        if grid_num < 1:
+        grid_row = int(grid_row_entry.get())
+        grid_col = int(grid_col_entry.get())
+        if grid_row < 1 or grid_col < 1:
             raise ValueError
-        draw_split_line()  # 重新绘制分割线
+        draw_split_line()
     except ValueError:
-        set_status("宫格数必须为大于等于1的整数。", "danger")
+        set_status("行数和列数必须为大于等于1的整数。", "danger")
 
 def get_original_image(file_path, file_extension):
     """加载原始图像或 PDF 页面"""
@@ -340,8 +430,8 @@ def vertical_flip():
 
 # 创建主窗口
 root = TkinterDnD.Tk()
-root.geometry("820x640")
-root.title("Image Splitter v1.5 —— QwejayHuang")
+root.geometry("880x680")
+root.title("Image Splitter 2.0 —— QwejayHuang")
 
 # 初始化 ttkbootstrap 样式
 style = ttk.Style("litera")
@@ -356,26 +446,27 @@ open_button.pack(side=LEFT, padx=10, pady=5)
 split_direction_var = tk.StringVar()
 split_direction_var.set('不分割')
 
-# 先不设置 trace
 direction_menu_label = ttk.Label(top_menu, text="分割类型:", bootstyle="secondary")
 direction_menu_label.pack(side=LEFT, padx=5)
 direction_menu = ttk.OptionMenu(top_menu, split_direction_var, '不分割', '不分割', '垂直', '水平', '多宫格')
 direction_menu.pack(side=LEFT, padx=10, pady=5)
 
-vcmd = (root.register(lambda value: value.isdigit() or value == ""), '%P')
-grid_entry_label = ttk.Label(top_menu, text="宫格数:", bootstyle="secondary")
-grid_entry_label.pack(side=LEFT, padx=5)
-grid_entry = ttk.Entry(top_menu, width=5, validate='key', validatecommand=vcmd)
-grid_entry.pack(side=LEFT, padx=5)
-grid_entry.insert(0, "9")
-grid_entry['state'] = 'disabled'
+split_direction_var.trace('w', update_split_direction)
 
-save_format_var = tk.StringVar()
-save_format_var.set('.jpg')
-save_format_label = ttk.Label(top_menu, text="保存格式:", bootstyle="secondary")
-save_format_label.pack(side=LEFT, padx=5)
-save_format_menu = ttk.OptionMenu(top_menu, save_format_var, '.JPG', '.JPG', '.PDF', '.PNG', '.BMP', '.WEBP', '.HEIC')
-save_format_menu.pack(side=LEFT, padx=10, pady=5)
+vcmd = (root.register(lambda value: value.isdigit() or value == ""), '%P')
+grid_row_entry_label = ttk.Label(top_menu, text="行数:", bootstyle="secondary")
+grid_row_entry_label.pack(side=LEFT, padx=5)
+grid_row_entry = ttk.Entry(top_menu, width=5, validate='key', validatecommand=vcmd)
+grid_row_entry.pack(side=LEFT, padx=5)
+grid_row_entry.insert(0, "3")
+grid_row_entry['state'] = 'disabled'  # 默认不分割，行输入框变灰色
+
+grid_col_entry_label = ttk.Label(top_menu, text="列数:", bootstyle="secondary")
+grid_col_entry_label.pack(side=LEFT, padx=5)
+grid_col_entry = ttk.Entry(top_menu, width=5, validate='key', validatecommand=vcmd)
+grid_col_entry.pack(side=LEFT, padx=5)
+grid_col_entry.insert(0, "3")
+grid_col_entry['state'] = 'disabled'  # 默认不分割，列输入框变灰色
 
 # 创建dpi变量
 dpi_var = tk.StringVar()
@@ -390,6 +481,13 @@ dpi_combobox = ttk.Combobox(top_menu, textvariable=dpi_var, values=["默认", "7
 dpi_combobox.pack(side=LEFT, padx=10, pady=5)
 dpi_combobox.bind("<<ComboboxSelected>>", lambda event: set_status(f"DPI设置为: {dpi_var.get()}", "info"))
 dpi_combobox.bind("<FocusOut>", lambda event: set_status(f"DPI设置为: {dpi_var.get()}", "info"))
+
+save_format_var = tk.StringVar()
+save_format_var.set('.jpg')
+save_format_label = ttk.Label(top_menu, text="保存格式:", bootstyle="secondary")
+save_format_label.pack(side=LEFT, padx=5)
+save_format_menu = ttk.OptionMenu(top_menu, save_format_var, '.JPG', '.JPG', '.PDF', '.PNG', '.BMP', '.WEBP', '.HEIC')
+save_format_menu.pack(side=LEFT, padx=10, pady=5)
 
 save_button = ttk.Button(top_menu, text="保存文件", command=save_file, bootstyle="primary")
 save_button.pack(side=LEFT, padx=10, pady=5)
@@ -433,6 +531,19 @@ page_var.trace_add('write', lambda *args: update_current_page())
 button_inner_frame = ttk.Frame(button_frame)
 button_inner_frame.grid(row=0, column=2, padx=5, sticky='e')
 
+# 新增颜色选择器
+split_color_var = tk.StringVar()
+split_color_var.set('红色')  # 默认颜色
+split_color_var.trace('w', lambda *args: draw_split_line())  # 绑定变量变化事件
+
+# 添加标签
+color_label = ttk.Label(button_inner_frame, text="分割线颜色：", bootstyle="secondary")
+color_label.pack(side=LEFT, padx=5)
+
+color_options = ['红色', '蓝色', '绿色', '黑色', '黄色']
+color_menu = ttk.OptionMenu(button_inner_frame, split_color_var, '红色', *color_options)
+color_menu.pack(side=LEFT, padx=5)
+
 rotate_button = ttk.Button(button_inner_frame, text="旋转", command=lambda: rotate_image(), bootstyle="secondary")
 rotate_button.pack(side=LEFT, padx=5)
 
@@ -457,8 +568,9 @@ update_link.bind("<Button-1>", lambda e: open_update_link())
 root.drop_target_register(DND_FILES)
 root.dnd_bind('<<Drop>>', on_drop)
 
-# 绑定宫格数量输入框的值变化事件
-grid_entry.bind('<KeyRelease>', update_grid_lines)
+# 绑定行数和列数输入框的值变化事件
+grid_row_entry.bind('<KeyRelease>', update_grid_lines)
+grid_col_entry.bind('<KeyRelease>', update_grid_lines)
 
 # 启动主循环
 root.mainloop()
