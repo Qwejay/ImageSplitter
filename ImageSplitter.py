@@ -3,7 +3,6 @@ from tkinter import filedialog
 from PIL import Image, ImageTk
 import fitz  # PyMuPDF
 import os
-import math
 import threading
 from tkinterdnd2 import TkinterDnD, DND_FILES
 import webbrowser
@@ -29,6 +28,12 @@ img_display_y = 0
 img_display_width = 0
 img_display_height = 0
 split_color_var = None
+zoom_scale = 1.0  # 缩放比例
+img_offset_x = 0  # 图像偏移量
+img_offset_y = 0
+is_dragging = False  # 是否正在拖动
+drag_start_x = 0  # 拖动起始位置
+drag_start_y = 0
 
 # 颜色映射字典
 color_mapping = {
@@ -225,7 +230,7 @@ def update_current_page():
     set_status(f"当前页面: {current_page}/{total_pages}", "info")
 
 def display_image():
-    global img_display_x, img_display_y, img_display_width, img_display_height
+    global img_display_x, img_display_y, img_display_width, img_display_height, zoom_scale, img_offset_x, img_offset_y
     image_canvas.delete("image")
     if imgs:
         canvas_width = image_canvas.winfo_width()
@@ -233,15 +238,15 @@ def display_image():
         img_to_display = imgs[current_page - 1]
         img_width, img_height = img_to_display.size
         if img_width / img_height > canvas_width / canvas_height:
-            new_width = canvas_width
+            new_width = canvas_width * zoom_scale
             new_height = int(new_width * img_height / img_width)
         else:
-            new_height = canvas_height
+            new_height = canvas_height * zoom_scale
             new_width = int(new_height * img_width / img_height)
-        resized_img = img_to_display.resize((new_width, new_height))
+        resized_img = img_to_display.resize((int(new_width), int(new_height)))
         photo = ImageTk.PhotoImage(resized_img)
-        img_display_x = (canvas_width - new_width) / 2
-        img_display_y = (canvas_height - new_height) / 2
+        img_display_x = (canvas_width - new_width) / 2 + img_offset_x
+        img_display_y = (canvas_height - new_height) / 2 + img_offset_y
         img_display_width = new_width
         img_display_height = new_height
         image_canvas.create_image(img_display_x, img_display_y, anchor='nw', image=photo, tags="image")
@@ -252,8 +257,8 @@ def draw_split_line():
     image_canvas.delete("split_line")
     if imgs:
         direction = split_direction_var.get()
-        selected_color = split_color_var.get()  # 获取选择的中文颜色
-        color = color_mapping.get(selected_color, 'red')  # 获取对应的英文颜色
+        selected_color = split_color_var.get()
+        color = color_mapping.get(selected_color, 'red')
         if direction == '多宫格':
             try:
                 grid_row = int(grid_row_entry.get())
@@ -311,7 +316,6 @@ def update_split_direction(*args):
         grid_col_entry.delete(0, tk.END)
         grid_col_entry.insert(0, "2")
         grid_col_entry['state'] = 'normal'
-        image_canvas.bind("<B1-Motion>", drag_split_line)
     elif direction == '水平':
         grid_row_entry.delete(0, tk.END)
         grid_row_entry.insert(0, "2")
@@ -319,7 +323,6 @@ def update_split_direction(*args):
         grid_col_entry.delete(0, tk.END)
         grid_col_entry.insert(0, "1")
         grid_col_entry['state'] = 'disabled'
-        image_canvas.bind("<B1-Motion>", drag_split_line)
     elif direction == '多宫格':
         grid_row_entry.delete(0, tk.END)
         grid_row_entry.insert(0, "3")
@@ -327,11 +330,9 @@ def update_split_direction(*args):
         grid_col_entry.delete(0, tk.END)
         grid_col_entry.insert(0, "3")
         grid_col_entry['state'] = 'normal'
-        image_canvas.unbind("<B1-Motion>")
     else:
         grid_row_entry['state'] = 'disabled'
         grid_col_entry['state'] = 'disabled'
-        image_canvas.unbind("<B1-Motion>")
     draw_split_line()
 
 def drag_split_line(event):
@@ -428,10 +429,77 @@ def vertical_flip():
         display_image()
         set_status("图像已垂直翻转。", "info")
 
+def start_drag(event):
+    global is_dragging, drag_start_x, drag_start_y
+    is_dragging = True
+    drag_start_x = event.x
+    drag_start_y = event.y
+
+def stop_drag(event):
+    global is_dragging
+    is_dragging = False
+
+def on_drag(event):
+    global img_offset_x, img_offset_y, drag_start_x, drag_start_y
+    if is_dragging:
+        # 计算鼠标移动的距离
+        dx = event.x - drag_start_x
+        dy = event.y - drag_start_y
+        # 更新图像偏移量
+        img_offset_x += dx
+        img_offset_y += dy
+        # 更新拖动起始位置
+        drag_start_x = event.x
+        drag_start_y = event.y
+        # 重新显示图像
+        display_image()
+
+def zoom_in(event=None):
+    global zoom_scale, img_offset_x, img_offset_y
+    if event:
+        # 获取鼠标指针在画布上的位置
+        mouse_x = event.x
+        mouse_y = event.y
+        # 计算缩放中心相对于图像中心的偏移量
+        center_x = img_display_x + img_display_width / 2
+        center_y = img_display_y + img_display_height / 2
+        offset_x = (mouse_x - center_x) * (1.1 - 1)
+        offset_y = (mouse_y - center_y) * (1.1 - 1)
+        img_offset_x -= offset_x
+        img_offset_y -= offset_y
+    zoom_scale *= 1.1
+    display_image()
+
+def zoom_out(event=None):
+    global zoom_scale, img_offset_x, img_offset_y
+    if event:
+        # 获取鼠标指针在画布上的位置
+        mouse_x = event.x
+        mouse_y = event.y
+        # 计算缩放中心相对于图像中心的偏移量
+        center_x = img_display_x + img_display_width / 2
+        center_y = img_display_y + img_display_height / 2
+        offset_x = (mouse_x - center_x) * (1 / 1.1 - 1)
+        offset_y = (mouse_y - center_y) * (1 / 1.1 - 1)
+        img_offset_x -= offset_x
+        img_offset_y -= offset_y
+    zoom_scale /= 1.1
+    display_image()
+
+def reset_zoom():
+    global zoom_scale, img_offset_x, img_offset_y
+    zoom_scale = 1.0
+    img_offset_x = 0
+    img_offset_y = 0
+    display_image()
+
 # 创建主窗口
 root = TkinterDnD.Tk()
 root.geometry("880x680")
-root.title("Image Splitter 2.0 —— QwejayHuang")
+root.title("Image Splitter 2.1 —— QwejayHuang")
+
+# 设置窗口图标
+root.iconbitmap('icon.ico')
 
 # 初始化 ttkbootstrap 样式
 style = ttk.Style("litera")
@@ -499,8 +567,8 @@ preview_frame.pack(fill=BOTH, expand=True, padx=10, pady=5)
 image_canvas = ttk.Canvas(preview_frame, background="#e0e0e0")
 image_canvas.pack(fill=BOTH, expand=True)
 
-# 设置 trace，确保 image_canvas 已定义
-split_direction_var.trace('w', update_split_direction)
+# 绑定拖动事件
+image_canvas.bind("<B1-Motion>", on_drag)
 
 # 绑定窗口大小变化事件
 def on_resize(event):
@@ -552,6 +620,22 @@ horizontal_flip_button.pack(side=LEFT, padx=5)
 
 vertical_flip_button = ttk.Button(button_inner_frame, text="垂直镜像", command=lambda: vertical_flip(), bootstyle="secondary")
 vertical_flip_button.pack(side=LEFT, padx=5)
+
+# 添加缩放按钮
+zoom_in_button = ttk.Button(button_inner_frame, text="放大", command=zoom_in, bootstyle="secondary")
+zoom_in_button.pack(side=LEFT, padx=5)
+
+zoom_out_button = ttk.Button(button_inner_frame, text="缩小", command=zoom_out, bootstyle="secondary")
+zoom_out_button.pack(side=LEFT, padx=5)
+
+reset_zoom_button = ttk.Button(button_inner_frame, text="重置", command=reset_zoom, bootstyle="secondary")
+reset_zoom_button.pack(side=LEFT, padx=5)
+
+# 绑定鼠标事件
+image_canvas.bind("<ButtonPress-1>", start_drag)
+image_canvas.bind("<ButtonRelease-1>", stop_drag)
+image_canvas.bind("<B1-Motion>", on_drag)
+image_canvas.bind("<MouseWheel>", lambda event: zoom_in(event) if event.delta > 0 else zoom_out(event))  # 鼠标滚轮缩放
 
 # 状态栏
 status_bar = ttk.Frame(root, relief='sunken', borderwidth=1)
