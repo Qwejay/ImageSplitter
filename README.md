@@ -1,6 +1,7 @@
 # Image Splitter
 
 **Image Splitter** 这是一个图像拆分（九宫格神器）小工具，兼具pdf和jpg等格式的互转功能。
+![image](https://github.com/user-attachments/assets/8538b38a-f909-4721-b46c-6fa9c6a392eb)
 
 ## 功能特点
 
