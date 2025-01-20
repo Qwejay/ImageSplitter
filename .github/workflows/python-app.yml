@@ -29,7 +29,6 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller ttkbootstrap pillow-heif
           pip install -r requirements.txt
 
       # 4. 下载并解压 tkdnd（用于拖放功能）
@@ -46,7 +45,7 @@ jobs:
             --onefile `
             --windowed `
             --icon=icon.ico `
-            --add-data "icon.ico;." `
+            --add-data "icon.ico" `
             --add-data "tkdnd/*;tkdnd" `
             --hidden-import=ttkbootstrap `
             --hidden-import=pillow_heif `
