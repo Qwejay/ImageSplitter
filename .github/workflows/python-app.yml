@@ -42,7 +42,7 @@ jobs:
       # 5. 使用 PyInstaller 打包应用
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd/*;tkdnd" --hidden-import=ttkbootstrap ImageSplitter.py
+          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd/*;tkdnd" --hidden-import=ttkbootstrap --hidden-import=pillow_heif ImageSplitter.py
 
       # 6. 上传构建产物作为 Artifact
       - name: Upload artifact
