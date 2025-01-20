@@ -35,14 +35,23 @@ jobs:
       # 4. 下载并解压 tkdnd（用于拖放功能）
       - name: Download and extract tkdnd
         run: |
-          curl -L -o tkdnd.zip https://github.com/petasis/tkdnd/releases/download/tkdnd-release-test-v2.9.4-rc3/tkdnd-2.9.4-windows-x64.zip
-          mkdir -p tkdnd
-          tar -xf tkdnd.zip -C tkdnd
+          $tkdndUrl = "https://github.com/petasis/tkdnd/releases/download/tkdnd-release-test-v2.9.4-rc3/tkdnd-2.9.4-windows-x64.zip"
+          Invoke-WebRequest -Uri $tkdndUrl -OutFile tkdnd.zip
+          Expand-Archive -Path tkdnd.zip -DestinationPath tkdnd -Force
 
       # 5. 使用 PyInstaller 打包应用
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd/*;tkdnd" --hidden-import=ttkbootstrap --hidden-import=pillow_heif ImageSplitter.py
+          pyinstaller `
+            --onefile `
+            --windowed `
+            --icon=icon.ico `
+            --add-data "icon.ico;." `
+            --add-data "tkdnd/*;tkdnd" `
+            --hidden-import=ttkbootstrap `
+            --hidden-import=pillow_heif `
+            --clean `
+            ImageSplitter.py
 
       # 6. 上传构建产物作为 Artifact
       - name: Upload artifact
