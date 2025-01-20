@@ -15,67 +15,99 @@ jobs:
       contents: write
 
     steps:
+      # 1. 检出代码库
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # 2. 设置 Python 环境
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.12'
 
+      # 3. 安装依赖
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
           pip install -r requirements.txt
 
+      # 4. 下载并解压 tkdnd（用于拖放功能）
       - name: Download and extract tkdnd
         run: |
           curl -L -o tkdnd.zip https://github.com/petasis/tkdnd/releases/download/tkdnd-release-test-v2.9.4-rc3/tkdnd-2.9.4-windows-x64.zip
           mkdir -p tkdnd
           tar -xf tkdnd.zip -C tkdnd
 
+      # 5. 使用 PyInstaller 打包应用
       - name: Build with PyInstaller
         run: |
-          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd;tkdnd" ImageSplitter.py
+          pyinstaller --onefile --windowed --icon=icon.ico --add-data "icon.ico;." --add-data "tkdnd/*;tkdnd" ImageSplitter.py
 
+      # 6. 上传构建产物作为 Artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ImageSplitter-build
           path: dist/ImageSplitter.exe
 
+      # 7. 获取最新 Release 版本号（如果没有则从 1.0 开始）
+      - name: Get latest release version
+        id: get_version
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const response = await github.rest.repos.listReleases({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              per_page: 1, // 只获取最新的 Release
+            });
+            let version;
+            if (response.data.length === 0) {
+              version = '1.0'; // 如果没有 Release，从 1.0 开始
+            } else {
+              const latestTag = response.data[0].tag_name;
+              const versionMatch = latestTag.match(/^(\d+)\.(\d+)$/);
+              if (!versionMatch) {
+                version = '1.0'; // 如果 tag_name 不符合规范，从 1.0 开始
+              } else {
+                // 递增版本号（例如 1.0 -> 1.1）
+                const major = parseInt(versionMatch[1], 10);
+                const minor = parseInt(versionMatch[2], 10) + 1;
+                version = `${major}.${minor}`;
+              }
+            }
+            // 使用环境文件设置输出
+            const fs = require('fs');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+
+      # 8. 创建 GitHub Release
       - name: Create Release
         id: create_release
         uses: actions/github-script@v6
         with:
           script: |
-            const tagName = 'v1.1';
-            const releaseName = 'Release v1.1';
-            try {
-              const release = await github.rest.repos.createRelease({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                tag_name: tagName,
-                name: releaseName,
-                draft: false,
-                prerelease: false,
-              });
-              console.log("Release created successfully:", release.data.html_url);
-              return {
-                upload_url: release.data.upload_url,
-              };
-            } catch (error) {
-              console.error("Failed to create release:", error);
-              throw error;
-            }
+            const tagName = '${{ steps.get_version.outputs.version }}'; // 使用动态生成的版本号
+            const releaseName = 'ImageSplitter v' + tagName; // 设置 Release 名称
+            const response = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tagName, // 使用生成的版本号作为 tag
+              name: releaseName, // 设置 Release 名称
+              draft: false,
+              prerelease: false,
+            });
+            // 使用环境文件设置输出
+            const fs = require('fs');
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `upload_url=${response.data.upload_url}\n`);
 
+      # 9. 上传构建产物到 Release
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: dist/ImageSplitter.exe
-          asset_name: ImageSplitter.exe
-          asset_content_type: application/octet-stream
+          upload_url: ${{ steps.create_release.outputs.upload_url }} # 使用上一步生成的 Release URL
+          asset_path: dist/ImageSplitter.exe # 上传的构建产物路径
+          asset_name: ImageSplitter-v${{ steps.get_version.outputs.version }}.exe # 动态生成带版本号的文件名
+          asset_content_type: application/octet-stream # 设置文件类型
