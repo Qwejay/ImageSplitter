@@ -2,3 +2,4 @@ PyMuPDF
 Pillow==11.0.0
 tkinterdnd2==0.4.2
 ttkbootstrap
+tkinterdnd2
