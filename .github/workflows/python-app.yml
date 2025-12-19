@@ -45,7 +45,7 @@ jobs:
             --onefile `
             --windowed `
             --icon=icon.ico `
-            --add-data "icon.ico" `
+            --add-data "icon.ico;." `
             --add-data "tkdnd/*;tkdnd" `
             --hidden-import=ttkbootstrap `
             --hidden-import=pillow_heif `
