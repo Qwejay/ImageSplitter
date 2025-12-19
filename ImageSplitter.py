@@ -244,7 +244,7 @@ def update_current_page():
     set_status(f"当前页面: {current_page}/{total_pages}", "info")
 
 def display_image():
-    global img_display_x, img_display_y, img_display_width, img_display_height, zoom_scale, auto_fit_on_load
+    global img_display_x, img_display_y, img_display_width, img_display_height, zoom_scale, auto_fit_on_load, img_offset_x, img_offset_y
     
     image_canvas.delete("image")
     if not imgs:
