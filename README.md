@@ -95,7 +95,7 @@
 nuitka --standalone --onefile --windows-console-mode=disable --include-data-file=icon.ico=icon.ico --windows-icon-from-ico=icon.ico --enable-plugin=tk-inter --include-package=PIL --include-package=fitz --include-package=ttkbootstrap --include-package=pillow_heif --output-dir=dist ImageSplitter.py
 
 pyinstaller --onefile --windowed --icon=icon.ico --add-data "tkdnd;tkdnd" ImageSplitter.py
-
+```
 ## Star History
 
 <a href="https://www.star-history.com/?repos=Qwejay%2FImageSplitter&type=date&legend=top-left">
