@@ -95,3 +95,13 @@
 nuitka --standalone --onefile --windows-console-mode=disable --include-data-file=icon.ico=icon.ico --windows-icon-from-ico=icon.ico --enable-plugin=tk-inter --include-package=PIL --include-package=fitz --include-package=ttkbootstrap --include-package=pillow_heif --output-dir=dist ImageSplitter.py
 
 pyinstaller --onefile --windowed --icon=icon.ico --add-data "tkdnd;tkdnd" ImageSplitter.py
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=Qwejay%2FImageSplitter&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Qwejay/ImageSplitter&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Qwejay/ImageSplitter&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Qwejay/ImageSplitter&type=date&legend=top-left" />
+ </picture>
+</a>
