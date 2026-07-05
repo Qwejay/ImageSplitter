@@ -18,6 +18,12 @@ except ImportError:
     DROP_SUPPORTED = False
     print("Warning: tkinterdnd2 not installed. Drag-and-drop disabled.")
 
+__app_name__ = "ImageSplitter"
+__version__ = "2.1"
+__author__ = "QwejayHuang"
+__company__ = "QwejayHuang"
+__description__ = "图片与 PDF 自动裁剪及分割工具"
+
 # 全局变量
 file_path = ""
 imgs = []
@@ -616,7 +622,7 @@ else:
     root = tk.Tk()  # 降级使用普通 Tk
 
 root.geometry("880x680")
-root.title("Image Splitter 2.1 —— QwejayHuang")
+root.title(f"{__app_name__} {__version__} —— {__author__}")
 
 # 设置窗口图标（忽略错误）
 try:
