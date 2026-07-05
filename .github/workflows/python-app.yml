@@ -2,11 +2,8 @@ name: Build and Package ImageSplitter
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -17,11 +14,11 @@ jobs:
     steps:
       # 1. 检出代码库
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 2. 设置 Python 环境
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
@@ -38,7 +35,38 @@ jobs:
           Invoke-WebRequest -Uri $tkdndUrl -OutFile tkdnd.zip
           Expand-Archive -Path tkdnd.zip -DestinationPath tkdnd -Force
 
-      # 5. 使用 PyInstaller 打包应用
+      # 5. 提取 Tag 版本号并将其同步写入到 python 程序的 __version__ 字段中
+      - name: Extract and Sync Version to Code
+        shell: python
+        run: |
+          import re
+          import os
+
+          # 获取当前的 Tag 名（例如 v2.1.0）并去掉前导 'v' 得到纯版本号
+          tag = "${{ github.ref_name }}"
+          version = tag[1:] if tag.lower().startswith('v') else tag
+          print(f"Target version to sync: {version}")
+
+          # 写入 Github 环境变量供后续步骤使用
+          with open(os.environ['GITHUB_ENV'], 'a') as f:
+              f.write(f"VERSION={version}\n")
+
+          # 寻找 ImageSplitter.py 中的 __version__ 并替换值
+          main_path = "ImageSplitter.py"
+          if os.path.exists(main_path):
+              with open(main_path, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              # 匹配并替换 __version__ = "x.y.z"
+              new_content = re.sub(r'(__version__\s*=\s*["\'])[^"\']+(["\'])', f'\\g<1>{version}\\g<2>', content, count=1)
+              
+              with open(main_path, 'w', encoding='utf-8') as f:
+                  f.write(new_content)
+              print(f"Successfully synchronized version in {main_path}.")
+          else:
+              print(f"Warning: {main_path} not found.")
+
+      # 6. 使用 PyInstaller 打包应用（此时代码中已包含最新版本号）
       - name: Build with PyInstaller
         run: |
           pyinstaller `
@@ -52,53 +80,23 @@ jobs:
             --clean `
             ImageSplitter.py
 
-      # 6. 上传构建产物作为 Artifact
+      # 7. 将打包后的 EXE 压缩为 ZIP
+      - name: Compress EXE to ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/ImageSplitter.exe" -DestinationPath "dist/ImageSplitter_${{ env.VERSION }}.zip"
+
+      # 8. 上传 ZIP 构建产物作为 Artifact
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ImageSplitter-build
-          path: dist/ImageSplitter.exe
+          name: ImageSplitter_build
+          path: dist/ImageSplitter_${{ env.VERSION }}.zip
 
-      # 7. 获取最新 Release 版本号（如果没有则从 1.0 开始）
-      - name: Get latest release version
-        id: get_version
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const response = await github.rest.repos.listReleases({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              per_page: 1, // 只获取最新的 Release
-            });
-            let version;
-            if (response.data.length === 0) {
-              version = '1.0'; // 如果没有 Release，从 1.0 开始
-            } else {
-              const latestTag = response.data[0].tag_name;
-              const versionMatch = latestTag.match(/^(\d+)\.(\d+)$/);
-              if (!versionMatch) {
-                version = '1.0'; // 如果 tag_name 不符合规范，从 1.0 开始
-              } else {
-                // 递增版本号（例如 1.0 -> 1.1）
-                const major = parseInt(versionMatch[1], 10);
-                const minor = parseInt(versionMatch[2], 10) + 1;
-                version = `${major}.${minor}`;
-              }
-            }
-            // 使用环境文件设置输出
-            const fs = require('fs');
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
-
-      # 8. 创建 Release 并上传构建产物
+      # 9. 创建 Release 并上传 ZIP 产物
       - name: Create Release and Upload Asset
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.get_version.outputs.version }} # 使用动态生成的版本号
-          name: ImageSplitter v${{ steps.get_version.outputs.version }} # Release 名称
-          body: "Release of ImageSplitter v${{ steps.get_version.outputs.version }}" # Release 描述
-          draft: false
-          prerelease: false
-          files: |
-            dist/ImageSplitter.exe
+          files: dist/ImageSplitter_${{ env.VERSION }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
