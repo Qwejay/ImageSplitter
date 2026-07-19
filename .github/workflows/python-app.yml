@@ -38,12 +38,14 @@ jobs:
       # 5. 提取 Tag 版本号并将其同步写入到 python 程序的 __version__ 字段中
       - name: Extract and Sync Version to Code
         shell: python
+        env:
+          TAG_NAME: ${{ github.ref_name }} # 将 GitHub 上下文变量作为环境变量传入，避免脚本语法注入风险
         run: |
           import re
           import os
 
-          # 获取当前的 Tag 名（例如 v2.1.0）并去掉前导 'v' 得到纯版本号
-          tag = "${{ github.ref_name }}"
+          # 获取当前的 Tag 名并去掉前导 'v' 得到纯版本号
+          tag = os.environ.get('TAG_NAME', '')
           version = tag[1:] if tag.lower().startswith('v') else tag
           print(f"Target version to sync: {version}")
 
