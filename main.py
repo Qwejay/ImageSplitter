@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import filedialog
 from PIL import Image, ImageTk
-import fitz  # PyMuPDF
+import fitz
 import os
 import threading
 import webbrowser
@@ -10,21 +10,18 @@ from ttkbootstrap.constants import *
 import pillow_heif
 import sys
 
-# 尝试导入 tkinterdnd2，失败则降级
 try:
     from tkinterdnd2 import TkinterDnD, DND_FILES
     DROP_SUPPORTED = True
 except ImportError:
     DROP_SUPPORTED = False
-    print("Warning: tkinterdnd2 not installed. Drag-and-drop disabled.")
 
 __app_name__ = "ImageSplitter"
-__version__ = "2.5"
+__version__ = "2.6"
 __author__ = "QwejayHuang"
 __company__ = "QwejayHuang"
 __description__ = "图片与 PDF 自动裁剪及分割工具"
 
-# 全局变量
 file_path = ""
 imgs = []
 file_extension = ""
@@ -42,22 +39,25 @@ img_display_y = 0
 img_display_width = 0
 img_display_height = 0
 split_color_var = None
-zoom_scale = 1.0  # 缩放比例
-img_offset_x = 0  # 图像偏移量
+zoom_scale = 1.0
+img_offset_x = 0
 img_offset_y = 0
-is_dragging = False  # 是否正在拖动
-drag_start_x = 0  # 拖动起始位置
+is_dragging = False
+drag_start_x = 0
 drag_start_y = 0
 last_mouse_x = 0
 last_mouse_y = 0
-auto_fit_on_load = True  # 首次加载或换页时自动适应窗口
-zoom_display_label = None  # 缩放比例显示标签
+auto_fit_on_load = True
+zoom_display_label = None
+is_rendering = False
+pending_render = False
 
-# 窗口实际高宽缓存，用以避免无意义的重绘
+DEFAULT_STATUS_MSG = "就绪 - 支持文件拖拽 | 鼠标滚轮缩放 | 拖拽平移"
+status_timer_id = None
+
 last_canvas_width = 0
 last_canvas_height = 0
 
-# 颜色映射字典
 color_mapping = {
     '红色': 'red',
     '蓝色': 'blue',
@@ -66,75 +66,64 @@ color_mapping = {
     '黄色': 'yellow'
 }
 
-# 函数定义
+def parse_page_range(range_str, total_pages):
+    pages = set()
+    for part in range_str.split(','):
+        part = part.strip()
+        if not part: continue
+        if '-' in part:
+            try:
+                start, end = map(int, part.split('-'))
+                start = max(1, start)
+                end = min(total_pages, end)
+                if start <= end:
+                    pages.update(range(start - 1, end))
+            except ValueError:
+                pass
+        else:
+            try:
+                val = int(part)
+                if 1 <= val <= total_pages:
+                    pages.add(val - 1)
+            except ValueError:
+                pass
+    return sorted(list(pages))
+
 def split_image(imgs, direction, grid_row=1, grid_col=1):
-    """根据方向分割图像"""
     split_imgs = []
     if direction == '多宫格':
-        try:
-            grid_row = int(grid_row_entry.get())
-            grid_col = int(grid_col_entry.get())
-            if grid_row < 1 or grid_col < 1:
-                raise ValueError
-            for img in imgs:
-                img_width, img_height = img.size
-                cell_width = img_width // grid_col
-                cell_height = img_height // grid_row
-                for r in range(grid_row):
-                    for c in range(grid_col):
-                        left = c * cell_width
-                        upper = r * cell_height
-                        right = left + cell_width
-                        lower = upper + cell_height
-                        split_img = img.crop((left, upper, right, lower))
-                        split_imgs.append(split_img)
-        except ValueError:
-            set_status("行数和列数必须为大于等于1的整数。", "danger")
-            return split_imgs
-    elif direction == '垂直':
-        try:
-            grid_col = int(grid_col_entry.get())
-            if grid_col < 1:
-                raise ValueError
-            for img in imgs:
-                img_width, img_height = img.size
-                cell_width = img_width // grid_col
-                cell_height = img_height
+        for img in imgs:
+            img_width, img_height = img.size
+            cell_width = img_width // grid_col
+            cell_height = img_height // grid_row
+            for r in range(grid_row):
                 for c in range(grid_col):
                     left = c * cell_width
-                    upper = 0
-                    right = left + cell_width
-                    lower = img_height
-                    split_img = img.crop((left, upper, right, lower))
-                    split_imgs.append(split_img)
-        except ValueError:
-            set_status("列数必须为大于等于1的整数。", "danger")
-            return split_imgs
-    elif direction == '水平':
-        try:
-            grid_row = int(grid_row_entry.get())
-            if grid_row < 1:
-                raise ValueError
-            for img in imgs:
-                img_width, img_height = img.size
-                cell_width = img_width
-                cell_height = img_height // grid_row
-                for r in range(grid_row):
-                    left = 0
                     upper = r * cell_height
-                    right = img_width
+                    right = left + cell_width
                     lower = upper + cell_height
-                    split_img = img.crop((left, upper, right, lower))
-                    split_imgs.append(split_img)
-        except ValueError:
-            set_status("行数必须为大于等于1的整数。", "danger")
-            return split_imgs
+                    split_imgs.append(img.crop((left, upper, right, lower)))
+    elif direction == '垂直':
+        for img in imgs:
+            img_width, img_height = img.size
+            cell_width = img_width // grid_col
+            for c in range(grid_col):
+                left = c * cell_width
+                right = left + cell_width
+                split_imgs.append(img.crop((left, 0, right, img_height)))
+    elif direction == '水平':
+        for img in imgs:
+            img_width, img_height = img.size
+            cell_height = img_height // grid_row
+            for r in range(grid_row):
+                upper = r * cell_height
+                lower = upper + cell_height
+                split_imgs.append(img.crop((0, upper, img_width, lower)))
     elif direction == '不分割':
         split_imgs.extend(imgs)
     return split_imgs
 
 def convert_image_mode(img, extension):
-    """根据文件扩展名转换图像模式"""
     ext = extension.lower()
     if ext in ['.jpg', '.jpeg', '.bmp', '.webp', '.heic']:
         return img.convert("RGB")
@@ -142,9 +131,7 @@ def convert_image_mode(img, extension):
         return img.convert("RGBA")
     return img
 
-def save_images(imgs, extension):
-    """保存分割后的图像"""
-    selected_dpi = dpi_var.get()
+def save_images(imgs, extension, selected_dpi):
     for i, img in enumerate(imgs):
         save_path = os.path.splitext(file_path)[0] + f"_part{i+1}" + extension
 
@@ -155,79 +142,81 @@ def save_images(imgs, extension):
                 set_status("DPI必须为整数或'默认'。", "danger")
                 continue
             
-            # 安全读取原始 DPI 结构
             orig_dpi = img.info.get('dpi')
             if isinstance(orig_dpi, (tuple, list)) and len(orig_dpi) >= 2 and isinstance(orig_dpi[0], (int, float)) and orig_dpi[0] > 0:
                 original_dpi = orig_dpi
             else:
                 original_dpi = (300, 300)
                 
-            scaling_factor = dpi / original_dpi[0]  # 计算缩放比例
+            scaling_factor = dpi / original_dpi[0]
             new_width = int(img.width * scaling_factor)
             new_height = int(img.height * scaling_factor)
             img = img.resize((new_width, new_height), resample=Image.LANCZOS)
-            img = convert_image_mode(img, extension)  # 转换图像模式
+            img = convert_image_mode(img, extension)
             if extension.lower() in ['.pdf']:
-                img.save(save_path, dpi=(dpi, dpi))  # 保存 PDF 时设置 DPI
+                img.save(save_path, dpi=(dpi, dpi))
             elif extension.lower() == '.heic':
-                # 保存 HEIC 格式
                 pillow_heif.from_pillow(img).save(save_path)
             else:
-                img.save(save_path, dpi=(dpi, dpi))  # 保存其他格式时设置 DPI
+                img.save(save_path, dpi=(dpi, dpi))
         else:
-            # 如果 DPI 为默认，直接保存图像
-            img = convert_image_mode(img, extension)  # 转换图像模式
+            img = convert_image_mode(img, extension)
             if extension.lower() == '.heic':
-                # 保存 HEIC 格式
                 pillow_heif.from_pillow(img).save(save_path)
             else:
-                img.save(save_path)  # 保存其他格式
-    set_status(f"图像保存成功，共 {len(imgs)} 个部分。", "success")
+                img.save(save_path)
+    set_status(f"图像保存成功，共导出 {len(imgs)} 个部分。", "success")
 
 def save_file():
-    """保存"""
     if not file_path:
         set_status("错误: 没有选择文件。", "danger")
         return
+        
+    range_str = save_range_var.get().strip()
+    if range_str == "全部" or not range_str:
+        selected_indices = list(range(len(imgs)))
+    elif range_str == "当前页":
+        selected_indices = [current_page - 1]
+    else:
+        selected_indices = parse_page_range(range_str, len(imgs))
+        
+    if not selected_indices:
+        set_status("错误: 导出的页面范围无效。", "danger")
+        return
+        
+    imgs_to_process = [imgs[i] for i in selected_indices]
+
     save_extension = save_format_var.get()
     direction = split_direction_var.get()
-    grid_row = grid_row_entry.get()
-    grid_col = grid_col_entry.get()
-    if direction == '多宫格':
+    selected_dpi = dpi_var.get()
+    
+    try:
+        grid_row = int(grid_row_entry.get()) if direction in ['多宫格', '水平'] else 1
+        grid_col = int(grid_col_entry.get()) if direction in ['多宫格', '垂直'] else 1
+        if grid_row < 1 or grid_col < 1:
+            raise ValueError
+    except ValueError:
+        set_status("行数和列数必须为大于等于1的整数。", "danger")
+        return
+
+    save_button.state(['disabled'])
+    set_status("正在后台处理并保存，请稍候...", "info")
+
+    def _save_task():
         try:
-            grid_row = int(grid_row)
-            grid_col = int(grid_col)
-            if grid_row < 1 or grid_col < 1:
-                raise ValueError
-        except ValueError:
-            set_status("行数和列数必须为大于等于1的整数。", "danger")
-            return
-    elif direction == '垂直':
-        try:
-            grid_col = int(grid_col)
-            if grid_col < 1:
-                raise ValueError
-        except ValueError:
-            set_status("列数必须为大于等于1的整数。", "danger")
-            return
-    elif direction == '水平':
-        try:
-            grid_row = int(grid_row)
-            if grid_row < 1:
-                raise ValueError
-        except ValueError:
-            set_status("行数必须为大于等于1的整数。", "danger")
-            return
-    imgs_to_save = split_image(imgs, direction, grid_row, grid_col)
-    save_images(imgs_to_save, save_extension)
+            imgs_to_save = split_image(imgs_to_process, direction, grid_row, grid_col)
+            save_images(imgs_to_save, save_extension, selected_dpi)
+        except Exception as e:
+            set_status(f"保存发生错误: {str(e)}", "danger")
+        finally:
+            root.after(0, lambda: save_button.state(['!disabled']))
+
+    threading.Thread(target=_save_task, daemon=True).start()
 
 def load_file_in_background(target_file_path, target_file_extension):
-    """后台加载文件（修复非主线程直接修改GUI引发的崩溃隐患）"""
     set_status("正在加载文件，请稍候...", "info")
     try:
         loaded_imgs = get_original_image(target_file_path, target_file_extension)
-        
-        # 定义主线程安全的 GUI 更新回调
         def update_gui():
             global imgs, total_pages, current_page, auto_fit_on_load, file_path, file_extension
             file_path = target_file_path
@@ -238,7 +227,7 @@ def load_file_in_background(target_file_path, target_file_extension):
             page_spinbox.state(['!disabled'])
             current_page = 1
             page_var.set(str(current_page))
-            auto_fit_on_load = True  # 关键：加载完成自动适应
+            auto_fit_on_load = True
             display_image()
             set_status(f"文件加载完成: {target_file_path}, 共 {total_pages} 页", "success")
 
@@ -248,7 +237,6 @@ def load_file_in_background(target_file_path, target_file_extension):
         root.after(0, lambda: set_status(f"文件加载失败: {error_msg}", "danger"))
 
 def open_file():
-    """打开文件"""
     selected_path = filedialog.askopenfilename(filetypes=[("图片文件", "*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.heic")])
     if selected_path:
         ext = os.path.splitext(selected_path)[1].lower()
@@ -260,20 +248,37 @@ def open_file():
         set_status("未选择文件。", "warning")
 
 def update_current_page():
-    """更新当前页面（修复用户手动删除/修改Spinbox数字时的崩溃隐患）"""
     global current_page, auto_fit_on_load
     val = page_var.get().strip()
     if not val:
-        return  # 允许用户输入时的临时空值状态，不触发报错
+        return
     try:
         page_num = int(val)
         if 1 <= page_num <= total_pages:
             current_page = page_num
-            auto_fit_on_load = True  # 切换页面时重新适应窗口
+            auto_fit_on_load = True
             display_image()
             set_status(f"当前页面: {current_page}/{total_pages}", "info")
     except ValueError:
-        pass  # 忽略临时的无效字符输入
+        pass
+
+def schedule_display():
+    global is_rendering, pending_render
+    if is_rendering:
+        pending_render = True
+    else:
+        is_rendering = True
+        root.after(1, _do_display)
+
+def _do_display():
+    global is_rendering, pending_render
+    try:
+        display_image()
+    finally:
+        is_rendering = False
+        if pending_render:
+            pending_render = False
+            schedule_display()
 
 def display_image():
     global img_display_x, img_display_y, img_display_width, img_display_height, zoom_scale, auto_fit_on_load, img_offset_x, img_offset_y
@@ -291,46 +296,37 @@ def display_image():
     img_to_display = imgs[current_page - 1]
     img_width, img_height = img_to_display.size
     
-    # 自动适应窗口逻辑
     if auto_fit_on_load and img_width > 0 and img_height > 0:
-        scale_w = (canvas_width * 0.95) / img_width  # 留5%边距
+        scale_w = (canvas_width * 0.95) / img_width
         scale_h = (canvas_height * 0.95) / img_height
         zoom_scale = min(scale_w, scale_h)
-        if zoom_scale < 0.1: zoom_scale = 0.1  # 最小缩放限制
-        if zoom_scale > 10: zoom_scale = 10     # 最大缩放限制
+        if zoom_scale < 0.1: zoom_scale = 0.1
+        if zoom_scale > 10: zoom_scale = 10
         img_offset_x = 0
         img_offset_y = 0
-        auto_fit_on_load = False  # 只触发一次
+        auto_fit_on_load = False
     
-    # 计算缩放后的尺寸
     scaled_width = img_width * zoom_scale
     scaled_height = img_height * zoom_scale
     
-    # 确保图像至少显示一部分
     if scaled_width < 10:
         scaled_width = 10
     if scaled_height < 10:
         scaled_height = 10
     
-    # 创建缩放后的图像
     try:
-        resized_img = img_to_display.resize((int(scaled_width), int(scaled_height)), Image.LANCZOS)
+        resized_img = img_to_display.resize((int(scaled_width), int(scaled_height)), Image.BILINEAR)
         photo = ImageTk.PhotoImage(resized_img)
         
-        # 设置图像位置（考虑偏移量）
         img_display_x = canvas_width / 2 - scaled_width / 2 + img_offset_x
         img_display_y = canvas_height / 2 - scaled_height / 2 + img_offset_y
         img_display_width = scaled_width
         img_display_height = scaled_height
         
-        # 显示图像
         image_canvas.create_image(img_display_x, img_display_y, anchor='nw', image=photo, tags="image")
-        image_canvas.image = photo  # 保持引用防止被垃圾回收
+        image_canvas.image = photo
         
-        # 更新缩放比例显示
         update_zoom_display()
-        
-        # 绘制分割线
         draw_split_line()
         
     except Exception as e:
@@ -411,14 +407,17 @@ def draw_split_line():
             pass
 
 def set_status(message, color="secondary"):
-    """设置状态栏信息（主线程安全封装）"""
     def _set():
+        global status_timer_id
+        if status_timer_id is not None:
+            root.after_cancel(status_timer_id)
+        
         status_label.config(text=message, bootstyle=color)
-        root.after(5000, lambda: status_label.config(text="", bootstyle="secondary"))
+        status_timer_id = root.after(5000, lambda: status_label.config(text=DEFAULT_STATUS_MSG, bootstyle="secondary"))
+    
     root.after(0, _set)
 
 def update_split_direction(*args):
-    """更新分割方向"""
     global image_canvas, grid_row_entry, grid_col_entry
     direction = split_direction_var.get()
     if direction == '垂直':
@@ -448,9 +447,11 @@ def update_split_direction(*args):
     draw_split_line()
 
 def on_drop(event):
-    """处理拖放文件"""
     global file_path, file_extension
-    dropped_path = event.data.strip('{}')
+    paths = root.tk.splitlist(event.data)
+    if not paths:
+        return
+    dropped_path = paths[0]
     ext = os.path.splitext(dropped_path)[1].lower()
     if ext in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
         threading.Thread(target=load_file_in_background, args=(dropped_path, ext), daemon=True).start()
@@ -458,11 +459,10 @@ def on_drop(event):
         set_status(f"不支持的文件类型: {ext}", "danger")
 
 def update_grid_lines(event):
-    """当宫格数量变化时，更新分割线（修复删空时报异常红字的体验缺陷）"""
     row_val = grid_row_entry.get().strip()
     col_val = grid_col_entry.get().strip()
     if not row_val or not col_val:
-        return  # 如果用户正在删改使其临时为空，则静默，不弹出错误警告
+        return
     try:
         grid_row = int(row_val)
         grid_col = int(col_val)
@@ -473,7 +473,6 @@ def update_grid_lines(event):
         pass
 
 def get_original_image(target_file_path, target_file_extension):
-    """加载原始图像或 PDF 页面"""
     if target_file_extension == '.heic':
         heif_file = pillow_heif.read_heif(target_file_path)
         img = Image.frombytes(
@@ -501,40 +500,46 @@ def get_original_image(target_file_path, target_file_extension):
         return [Image.open(target_file_path).convert("RGB")]
 
 def on_dpi_change(*args):
-    """DPI 下拉选择变更时的回调（修复 PDF 的 DPI 无法实时渲染的问题）"""
     global file_path, file_extension
     set_status(f"DPI设置为: {dpi_var.get()}", "info")
-    # 如果当前已经载入了 PDF，则重新读取 PDF 的各页并渲染
     if file_path and file_extension == '.pdf':
         threading.Thread(target=load_file_in_background, args=(file_path, file_extension), daemon=True).start()
 
 def open_update_link():
-    """打开更新链接"""
     webbrowser.open("https://github.com/Qwejay/ImageSplitter")
 
 def rotate_image():
-    """旋转当前页面图像 90 度"""
     global imgs, current_page
     if imgs:
-        imgs[current_page - 1] = imgs[current_page - 1].rotate(90, expand=True)
+        if apply_all_var.get():
+            imgs = [img.rotate(90, expand=True) for img in imgs]
+            set_status("所有页面已旋转 90 度。", "info")
+        else:
+            imgs[current_page - 1] = imgs[current_page - 1].rotate(90, expand=True)
+            set_status("当前页面已旋转 90 度。", "info")
         display_image()
-        set_status("图像已旋转 90 度。", "info")
 
 def horizontal_flip():
-    """水平翻转当前页面图像"""
     global imgs, current_page
     if imgs:
-        imgs[current_page - 1] = imgs[current_page - 1].transpose(Image.FLIP_LEFT_RIGHT)
+        if apply_all_var.get():
+            imgs = [img.transpose(Image.FLIP_LEFT_RIGHT) for img in imgs]
+            set_status("所有页面已水平翻转。", "info")
+        else:
+            imgs[current_page - 1] = imgs[current_page - 1].transpose(Image.FLIP_LEFT_RIGHT)
+            set_status("当前页面已水平翻转。", "info")
         display_image()
-        set_status("图像已水平翻转。", "info")
 
 def vertical_flip():
-    """垂直翻转当前页面图像"""
     global imgs, current_page
     if imgs:
-        imgs[current_page - 1] = imgs[current_page - 1].transpose(Image.FLIP_TOP_BOTTOM)
+        if apply_all_var.get():
+            imgs = [img.transpose(Image.FLIP_TOP_BOTTOM) for img in imgs]
+            set_status("所有页面已垂直翻转。", "info")
+        else:
+            imgs[current_page - 1] = imgs[current_page - 1].transpose(Image.FLIP_TOP_BOTTOM)
+            set_status("当前页面已垂直翻转。", "info")
         display_image()
-        set_status("图像已垂直翻转。", "info")
 
 def start_drag(event):
     global is_dragging, drag_start_x, drag_start_y, last_mouse_x, last_mouse_y
@@ -559,10 +564,9 @@ def on_drag(event):
         drag_start_y = event.y
         last_mouse_x = event.x
         last_mouse_y = event.y
-        display_image()
+        schedule_display()
 
 def adjust_offset_for_zoom(old_scale, new_scale, mouse_x, mouse_y):
-    """根据鼠标位置调整偏移量以实现精确缩放"""
     global img_offset_x, img_offset_y, img_display_x, img_display_y, img_display_width, img_display_height
     
     if not imgs:
@@ -594,7 +598,6 @@ def adjust_offset_for_zoom(old_scale, new_scale, mouse_x, mouse_y):
     img_offset_y = mouse_y - (canvas_center_y - new_height / 2 + new_img_y)
 
 def zoom_in(event=None):
-    """放大图像"""
     global zoom_scale, last_mouse_x, last_mouse_y
     
     if not imgs: return
@@ -611,10 +614,9 @@ def zoom_in(event=None):
         last_mouse_y = event.y
         adjust_offset_for_zoom(old_scale, zoom_scale, event.x, event.y)
     
-    display_image()
+    schedule_display()
 
 def zoom_out(event=None):
-    """缩小图像"""
     global zoom_scale, last_mouse_x, last_mouse_y
     
     if not imgs: return
@@ -631,10 +633,9 @@ def zoom_out(event=None):
         last_mouse_y = event.y
         adjust_offset_for_zoom(old_scale, zoom_scale, event.x, event.y)
     
-    display_image()
+    schedule_display()
 
 def reset_zoom():
-    """重置为原始尺寸（1:1）"""
     global zoom_scale, img_offset_x, img_offset_y
     zoom_scale = 1.0
     img_offset_x = 0
@@ -643,94 +644,91 @@ def reset_zoom():
     set_status("缩放已重置为原始尺寸", "info")
 
 def fit_to_window():
-    """适应窗口"""
     global auto_fit_on_load
     auto_fit_on_load = True
     display_image()
     set_status("已适应窗口", "info")
 
 def update_zoom_display():
-    """更新缩放比例显示"""
     if zoom_display_label:
         percentage = int(zoom_scale * 100)
         zoom_display_label.config(text=f"{percentage}%")
 
-# 创建主窗口
 if DROP_SUPPORTED:
     root = TkinterDnD.Tk()
 else:
-    root = tk.Tk()  # 降级使用普通 Tk
+    root = tk.Tk()
 
-root.geometry("880x680")
+root.geometry("1080x720")
 root.title(f"{__app_name__} {__version__} —— {__author__}")
 
-# 设置窗口图标（忽略错误）
 try:
     root.iconbitmap('icon.ico')
 except:
     pass
 
-# 初始化 ttkbootstrap 样式
 style = ttk.Style("litera")
 
-# 创建顶部菜单
 top_menu = ttk.Frame(root)
-top_menu.pack(fill=tk.X, padx=10, pady=5)
+top_menu.pack(fill=tk.X, padx=5, pady=5)
 
 open_button = ttk.Button(top_menu, text="打开文件", command=open_file, bootstyle="primary")
-open_button.pack(side=tk.LEFT, padx=10, pady=5)
+open_button.pack(side=tk.LEFT, padx=5, pady=5)
 
 split_direction_var = tk.StringVar(value='不分割')
 
 direction_menu_label = ttk.Label(top_menu, text="分割类型:", bootstyle="secondary")
-direction_menu_label.pack(side=tk.LEFT, padx=5)
+direction_menu_label.pack(side=tk.LEFT, padx=2)
 direction_menu = ttk.OptionMenu(top_menu, split_direction_var, '不分割', '不分割', '垂直', '水平', '多宫格')
-direction_menu.pack(side=tk.LEFT, padx=10, pady=5)
+direction_menu.pack(side=tk.LEFT, padx=2, pady=5)
 
 split_direction_var.trace('w', update_split_direction)
 
 vcmd = (root.register(lambda value: value.isdigit() or value == ""), '%P')
 grid_row_entry_label = ttk.Label(top_menu, text="行数:", bootstyle="secondary")
-grid_row_entry_label.pack(side=tk.LEFT, padx=5)
+grid_row_entry_label.pack(side=tk.LEFT, padx=2)
 grid_row_entry = ttk.Entry(top_menu, width=5, validate='key', validatecommand=vcmd)
-grid_row_entry.pack(side=tk.LEFT, padx=5)
+grid_row_entry.pack(side=tk.LEFT, padx=2)
 grid_row_entry.insert(0, "3")
 grid_row_entry['state'] = 'disabled'
 
 grid_col_entry_label = ttk.Label(top_menu, text="列数:", bootstyle="secondary")
-grid_col_entry_label.pack(side=tk.LEFT, padx=5)
+grid_col_entry_label.pack(side=tk.LEFT, padx=2)
 grid_col_entry = ttk.Entry(top_menu, width=5, validate='key', validatecommand=vcmd)
-grid_col_entry.pack(side=tk.LEFT, padx=5)
+grid_col_entry.pack(side=tk.LEFT, padx=2)
 grid_col_entry.insert(0, "3")
 grid_col_entry['state'] = 'disabled'
 
 dpi_var = tk.StringVar(value="默认")
 dpi_label = ttk.Label(top_menu, text="保存DPI:", bootstyle="secondary")
-dpi_label.pack(side=tk.LEFT, padx=5)
+dpi_label.pack(side=tk.LEFT, padx=2)
 dpi_combobox = ttk.Combobox(top_menu, textvariable=dpi_var, values=["默认", "72", "150", "300"], width=5)
-dpi_combobox.pack(side=tk.LEFT, padx=10, pady=5)
+dpi_combobox.pack(side=tk.LEFT, padx=2, pady=5)
 
-# 使用安全的 DPI 联动方案
 dpi_combobox.bind("<<ComboboxSelected>>", on_dpi_change)
 dpi_combobox.bind("<FocusOut>", on_dpi_change)
 
 save_format_var = tk.StringVar(value='.jpg')
 save_format_label = ttk.Label(top_menu, text="保存格式:", bootstyle="secondary")
-save_format_label.pack(side=tk.LEFT, padx=5)
+save_format_label.pack(side=tk.LEFT, padx=2)
 save_format_menu = ttk.OptionMenu(top_menu, save_format_var, '.JPG', '.JPG', '.PDF', '.PNG', '.BMP', '.WEBP', '.HEIC')
-save_format_menu.pack(side=tk.LEFT, padx=10, pady=5)
+save_format_menu.pack(side=tk.LEFT, padx=2, pady=5)
+
+save_range_var = tk.StringVar(value="全部")
+save_range_label = ttk.Label(top_menu, text="导出范围:", bootstyle="secondary")
+save_range_label.pack(side=tk.LEFT, padx=2)
+save_range_combo = ttk.Combobox(top_menu, textvariable=save_range_var, values=["全部", "当前页", "1-3,5"], width=7)
+save_range_combo.pack(side=tk.LEFT, padx=5, pady=5)
 
 save_button = ttk.Button(top_menu, text="保存文件", command=save_file, bootstyle="primary")
-save_button.pack(side=tk.LEFT, padx=10, pady=5)
+save_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-# 创建预览区域
 preview_frame = ttk.Frame(root)
 preview_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
 image_canvas = ttk.Canvas(preview_frame, background="#e0e0e0")
 image_canvas.pack(fill=tk.BOTH, expand=True)
 
-# 创建按钮框架
 button_frame = ttk.Frame(preview_frame)
 button_frame.pack(fill=tk.X, pady=5)
 
@@ -742,12 +740,18 @@ page_control_frame = ttk.Frame(button_frame)
 page_control_frame.grid(row=0, column=1, padx=5, sticky='nsew')
 
 page_label = ttk.Label(page_control_frame, text="当前页面：", bootstyle="secondary")
-page_label.pack(side=tk.LEFT, padx=5)
+page_label.pack(side=tk.LEFT, padx=2)
+
+prev_page_btn = ttk.Button(page_control_frame, text="◀", command=lambda: page_var.set(str(current_page-1)) if current_page > 1 else None, bootstyle="secondary-outline")
+prev_page_btn.pack(side=tk.LEFT, padx=2)
 
 page_var = tk.StringVar(value="1")
-page_spinbox = ttk.Spinbox(page_control_frame, from_=1, to=1, textvariable=page_var, width=5)
-page_spinbox.pack(side=tk.LEFT, padx=5)
+page_spinbox = ttk.Spinbox(page_control_frame, from_=1, to=1, textvariable=page_var, width=4)
+page_spinbox.pack(side=tk.LEFT, padx=2)
 page_var.trace_add('write', lambda *args: update_current_page())
+
+next_page_btn = ttk.Button(page_control_frame, text="▶", command=lambda: page_var.set(str(current_page+1)) if current_page < total_pages else None, bootstyle="secondary-outline")
+next_page_btn.pack(side=tk.LEFT, padx=2)
 
 button_inner_frame = ttk.Frame(button_frame)
 button_inner_frame.grid(row=0, column=2, padx=5, sticky='e')
@@ -755,23 +759,26 @@ button_inner_frame.grid(row=0, column=2, padx=5, sticky='e')
 split_color_var = tk.StringVar(value='红色')
 split_color_var.trace('w', lambda *args: draw_split_line())
 
-color_label = ttk.Label(button_inner_frame, text="分割线颜色：", bootstyle="secondary")
-color_label.pack(side=tk.LEFT, padx=5)
+color_label = ttk.Label(button_inner_frame, text="分割线：", bootstyle="secondary")
+color_label.pack(side=tk.LEFT, padx=2)
 
 color_options = ['红色', '蓝色', '绿色', '黑色', '黄色']
 color_menu = ttk.OptionMenu(button_inner_frame, split_color_var, '红色', *color_options)
-color_menu.pack(side=tk.LEFT, padx=5)
+color_menu.pack(side=tk.LEFT, padx=2)
+
+apply_all_var = tk.BooleanVar(value=False)
+apply_all_chk = ttk.Checkbutton(button_inner_frame, text="操作全部页", variable=apply_all_var, bootstyle="round-toggle")
+apply_all_chk.pack(side=tk.LEFT, padx=5)
 
 rotate_button = ttk.Button(button_inner_frame, text="旋转", command=rotate_image, bootstyle="secondary")
-rotate_button.pack(side=tk.LEFT, padx=5)
+rotate_button.pack(side=tk.LEFT, padx=2)
 
 horizontal_flip_button = ttk.Button(button_inner_frame, text="水平镜像", command=horizontal_flip, bootstyle="secondary")
-horizontal_flip_button.pack(side=tk.LEFT, padx=5)
+horizontal_flip_button.pack(side=tk.LEFT, padx=2)
 
 vertical_flip_button = ttk.Button(button_inner_frame, text="垂直镜像", command=vertical_flip, bootstyle="secondary")
-vertical_flip_button.pack(side=tk.LEFT, padx=5)
+vertical_flip_button.pack(side=tk.LEFT, padx=2)
 
-# 缩放控制区
 zoom_frame = ttk.Frame(button_inner_frame)
 zoom_frame.pack(side=tk.LEFT, padx=5)
 
@@ -787,21 +794,18 @@ reset_zoom_button.pack(side=tk.LEFT, padx=2)
 fit_window_button = ttk.Button(zoom_frame, text="适应", command=fit_to_window, bootstyle="secondary")
 fit_window_button.pack(side=tk.LEFT, padx=2)
 
-zoom_display_label = ttk.Label(zoom_frame, text="100%", bootstyle="secondary", width=6)
-zoom_display_label.pack(side=tk.LEFT, padx=5)
+zoom_display_label = ttk.Label(zoom_frame, text="100%", bootstyle="secondary", width=5)
+zoom_display_label.pack(side=tk.LEFT, padx=2)
 
-# 绑定鼠标事件
 image_canvas.bind("<ButtonPress-1>", start_drag)
 image_canvas.bind("<ButtonRelease-1>", stop_drag)
 image_canvas.bind("<B1-Motion>", on_drag)
-image_canvas.bind("<MouseWheel>", lambda event: zoom_in(event) if event.delta > 0 else zoom_out(event))  # Windows
-image_canvas.bind("<Button-4>", lambda event: zoom_in(event))  # Linux
-image_canvas.bind("<Button-5>", lambda event: zoom_out(event))  # Linux
+image_canvas.bind("<MouseWheel>", lambda event: zoom_in(event) if event.delta > 0 else zoom_out(event))
+image_canvas.bind("<Button-4>", lambda event: zoom_in(event))
+image_canvas.bind("<Button-5>", lambda event: zoom_out(event))
 
-# 绑定窗口大小变化事件（防抖 + 大小变化双重过滤）
 def on_resize(event):
     global window_resize_id, last_canvas_width, last_canvas_height
-    # 过滤非实际尺寸改变的无效 Configure 事件，避免无谓重绘
     if event.width == last_canvas_width and event.height == last_canvas_height:
         return
     last_canvas_width = event.width
@@ -813,25 +817,23 @@ def on_resize(event):
 
 image_canvas.bind("<Configure>", on_resize)
 
-# 状态栏
 status_bar = ttk.Frame(root, relief='sunken', borderwidth=1)
 status_bar.pack(side=tk.BOTTOM, fill=tk.X)
 
-status_label = ttk.Label(status_bar, text="", bootstyle="secondary", anchor='w', padding=(5, 0))
+status_label = ttk.Label(status_bar, text=DEFAULT_STATUS_MSG, bootstyle="secondary", anchor='w', padding=(5, 0))
 status_label.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
 update_link = ttk.Label(status_bar, text="检查更新", cursor="hand2", foreground="blue")
 update_link.pack(side=tk.RIGHT, padx=5)
 update_link.bind("<Button-1>", lambda e: open_update_link())
 
-# 绑定拖放事件（如果支持）
 if DROP_SUPPORTED:
     root.drop_target_register(DND_FILES)
     root.dnd_bind('<<Drop>>', on_drop)
+    image_canvas.drop_target_register(DND_FILES)
+    image_canvas.dnd_bind('<<Drop>>', on_drop)
 
-# 绑定行数和列数输入框的值变化事件
 grid_row_entry.bind('<KeyRelease>', update_grid_lines)
 grid_col_entry.bind('<KeyRelease>', update_grid_lines)
 
-# 启动主循环
 root.mainloop()

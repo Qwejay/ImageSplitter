@@ -53,8 +53,8 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as f:
               f.write(f"VERSION={version}\n")
 
-          # 寻找 ImageSplitter.py 中的 __version__ 并替换值
-          main_path = "ImageSplitter.py"
+          # 寻找 main.py 中的 __version__ 并替换值
+          main_path = "main.py"
           if os.path.exists(main_path):
               with open(main_path, 'r', encoding='utf-8') as f:
                   content = f.read()
@@ -80,7 +80,7 @@ jobs:
             --hidden-import=ttkbootstrap `
             --hidden-import=pillow_heif `
             --clean `
-            ImageSplitter.py
+            main.py
 
       # 7. 将打包后的 EXE 压缩为 ZIP
       - name: Compress EXE to ZIP
