@@ -72,6 +72,7 @@ jobs:
       - name: Build with PyInstaller
         run: |
           pyinstaller `
+            --name ImageSplitter `
             --onefile `
             --windowed `
             --icon=icon.ico `
