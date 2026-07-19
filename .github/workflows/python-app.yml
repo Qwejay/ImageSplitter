@@ -3,16 +3,16 @@ name: Build and Package ImageSplitter
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*' # 只要推送以 v 开头的 tag（如 v2.5），就会自动触发此工作流
 
 jobs:
   build:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: write # 确保工作流有权限创建 Release 并上传文件
 
     steps:
-      # 1. 检出代码库
+      # 1. 检出代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -39,13 +39,13 @@ jobs:
       - name: Extract and Sync Version to Code
         shell: python
         env:
-          TAG_NAME: ${{ github.ref_name }} # 将 GitHub 上下文变量作为环境变量传入，避免脚本语法注入风险
+          TAG_NAME: ${{ github.ref_name }} # 安全地将 Tag 名（例如 v2.5）传入环境变量
         run: |
           import re
           import os
 
-          # 获取当前的 Tag 名并去掉前导 'v' 得到纯版本号
           tag = os.environ.get('TAG_NAME', '')
+          # 去掉前导的 'v' 得到纯版本号 (例如 2.5)
           version = tag[1:] if tag.lower().startswith('v') else tag
           print(f"Target version to sync: {version}")
 
@@ -59,7 +59,7 @@ jobs:
               with open(main_path, 'r', encoding='utf-8') as f:
                   content = f.read()
               
-              # 匹配并替换 __version__ = "x.y.z"
+              # 正则匹配并替换 __version__ = "2.1" 为 __version__ = "2.5"
               new_content = re.sub(r'(__version__\s*=\s*["\'])[^"\']+(["\'])', f'\\g<1>{version}\\g<2>', content, count=1)
               
               with open(main_path, 'w', encoding='utf-8') as f:
@@ -68,7 +68,7 @@ jobs:
           else:
               print(f"Warning: {main_path} not found.")
 
-      # 6. 使用 PyInstaller 打包应用（此时代码中已包含最新版本号）
+      # 6. 使用 PyInstaller 打包应用
       - name: Build with PyInstaller
         run: |
           pyinstaller `
@@ -88,7 +88,7 @@ jobs:
         run: |
           Compress-Archive -Path "dist/ImageSplitter.exe" -DestinationPath "dist/ImageSplitter_${{ env.VERSION }}.zip"
 
-      # 8. 上传 ZIP 构建产物作为 Artifact
+      # 8. 上传 ZIP 构建产物作为 Action 备份（可选）
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -100,5 +100,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/ImageSplitter_${{ env.VERSION }}.zip
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
