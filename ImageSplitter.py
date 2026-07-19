@@ -53,6 +53,10 @@ last_mouse_y = 0
 auto_fit_on_load = True  # 首次加载或换页时自动适应窗口
 zoom_display_label = None  # 缩放比例显示标签
 
+# 窗口实际高宽缓存，用以避免无意义的重绘
+last_canvas_width = 0
+last_canvas_height = 0
+
 # 颜色映射字典
 color_mapping = {
     '红色': 'red',
@@ -131,12 +135,11 @@ def split_image(imgs, direction, grid_row=1, grid_col=1):
 
 def convert_image_mode(img, extension):
     """根据文件扩展名转换图像模式"""
-    if extension.lower() in ['.jpg', '.jpeg', '.bmp', '.webp', '.heic']:
+    ext = extension.lower()
+    if ext in ['.jpg', '.jpeg', '.bmp', '.webp', '.heic']:
         return img.convert("RGB")
-    elif extension.lower() == '.png':
+    elif ext == '.png':
         return img.convert("RGBA")
-    elif extension.lower() == '.heic':
-        return img.convert("RGB")  # HEIC 格式需要 RGB 模式
     return img
 
 def save_images(imgs, extension):
@@ -151,7 +154,14 @@ def save_images(imgs, extension):
             except ValueError:
                 set_status("DPI必须为整数或'默认'。", "danger")
                 continue
-            original_dpi = img.info.get('dpi', (300, 300))  # 默认假设原始 DPI 为 300
+            
+            # 安全读取原始 DPI 结构
+            orig_dpi = img.info.get('dpi')
+            if isinstance(orig_dpi, (tuple, list)) and len(orig_dpi) >= 2 and isinstance(orig_dpi[0], (int, float)) and orig_dpi[0] > 0:
+                original_dpi = orig_dpi
+            else:
+                original_dpi = (300, 300)
+                
             scaling_factor = dpi / original_dpi[0]  # 计算缩放比例
             new_width = int(img.width * scaling_factor)
             new_height = int(img.height * scaling_factor)
@@ -211,43 +221,59 @@ def save_file():
     imgs_to_save = split_image(imgs, direction, grid_row, grid_col)
     save_images(imgs_to_save, save_extension)
 
-def load_file_in_background(file_path, file_extension):
-    """后台加载文件"""
-    global imgs, total_pages, current_page, auto_fit_on_load
+def load_file_in_background(target_file_path, target_file_extension):
+    """后台加载文件（修复非主线程直接修改GUI引发的崩溃隐患）"""
     set_status("正在加载文件，请稍候...", "info")
     try:
-        imgs = get_original_image(file_path, file_extension)
-        total_pages = len(imgs)
-        page_spinbox.config(from_=1, to=total_pages)
-        page_spinbox.state(['!disabled'])
-        current_page = 1
-        page_var.set(current_page)
-        auto_fit_on_load = True  # 关键：加载完成自动适应
-        root.after(0, display_image)
-        set_status(f"文件加载完成: {file_path}, 共 {total_pages} 页", "success")
+        loaded_imgs = get_original_image(target_file_path, target_file_extension)
+        
+        # 定义主线程安全的 GUI 更新回调
+        def update_gui():
+            global imgs, total_pages, current_page, auto_fit_on_load, file_path, file_extension
+            file_path = target_file_path
+            file_extension = target_file_extension
+            imgs = loaded_imgs
+            total_pages = len(imgs)
+            page_spinbox.config(from_=1, to=total_pages)
+            page_spinbox.state(['!disabled'])
+            current_page = 1
+            page_var.set(str(current_page))
+            auto_fit_on_load = True  # 关键：加载完成自动适应
+            display_image()
+            set_status(f"文件加载完成: {target_file_path}, 共 {total_pages} 页", "success")
+
+        root.after(0, update_gui)
     except Exception as e:
-        set_status(f"文件加载失败: {str(e)}", "danger")
+        error_msg = str(e)
+        root.after(0, lambda: set_status(f"文件加载失败: {error_msg}", "danger"))
 
 def open_file():
     """打开文件"""
-    global file_path, file_extension
-    file_path = filedialog.askopenfilename(filetypes=[("图片文件", "*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.heic")])
-    if file_path:
-        file_extension = os.path.splitext(file_path)[1].lower()
-        if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
-            threading.Thread(target=load_file_in_background, args=(file_path, file_extension), daemon=True).start()
+    selected_path = filedialog.askopenfilename(filetypes=[("图片文件", "*.pdf;*.jpg;*.jpeg;*.png;*.bmp;*.webp;*.heic")])
+    if selected_path:
+        ext = os.path.splitext(selected_path)[1].lower()
+        if ext in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
+            threading.Thread(target=load_file_in_background, args=(selected_path, ext), daemon=True).start()
         else:
-            set_status(f"不支持的文件类型: {file_extension}", "danger")
+            set_status(f"不支持的文件类型: {ext}", "danger")
     else:
         set_status("未选择文件。", "warning")
 
 def update_current_page():
-    """更新当前页面"""
+    """更新当前页面（修复用户手动删除/修改Spinbox数字时的崩溃隐患）"""
     global current_page, auto_fit_on_load
-    current_page = int(page_var.get())
-    auto_fit_on_load = True  # 切换页面时重新适应窗口
-    display_image()
-    set_status(f"当前页面: {current_page}/{total_pages}", "info")
+    val = page_var.get().strip()
+    if not val:
+        return  # 允许用户输入时的临时空值状态，不触发报错
+    try:
+        page_num = int(val)
+        if 1 <= page_num <= total_pages:
+            current_page = page_num
+            auto_fit_on_load = True  # 切换页面时重新适应窗口
+            display_image()
+            set_status(f"当前页面: {current_page}/{total_pages}", "info")
+    except ValueError:
+        pass  # 忽略临时的无效字符输入
 
 def display_image():
     global img_display_x, img_display_y, img_display_width, img_display_height, zoom_scale, auto_fit_on_load, img_offset_x, img_offset_y
@@ -265,7 +291,7 @@ def display_image():
     img_to_display = imgs[current_page - 1]
     img_width, img_height = img_to_display.size
     
-    # 👇 自动适应窗口逻辑
+    # 自动适应窗口逻辑
     if auto_fit_on_load and img_width > 0 and img_height > 0:
         scale_w = (canvas_width * 0.95) / img_width  # 留5%边距
         scale_h = (canvas_height * 0.95) / img_height
@@ -385,9 +411,11 @@ def draw_split_line():
             pass
 
 def set_status(message, color="secondary"):
-    """设置状态栏信息"""
-    status_label.config(text=message, bootstyle=color)
-    root.after(5000, lambda: status_label.config(text="", bootstyle="secondary"))
+    """设置状态栏信息（主线程安全封装）"""
+    def _set():
+        status_label.config(text=message, bootstyle=color)
+        root.after(5000, lambda: status_label.config(text="", bootstyle="secondary"))
+    root.after(0, _set)
 
 def update_split_direction(*args):
     """更新分割方向"""
@@ -422,28 +450,32 @@ def update_split_direction(*args):
 def on_drop(event):
     """处理拖放文件"""
     global file_path, file_extension
-    file_path = event.data.strip('{}')
-    file_extension = os.path.splitext(file_path)[1].lower()
-    if file_extension in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
-        threading.Thread(target=load_file_in_background, args=(file_path, file_extension), daemon=True).start()
+    dropped_path = event.data.strip('{}')
+    ext = os.path.splitext(dropped_path)[1].lower()
+    if ext in ['.pdf', '.jpg', '.jpeg', '.png', '.bmp', '.webp', '.heic']:
+        threading.Thread(target=load_file_in_background, args=(dropped_path, ext), daemon=True).start()
     else:
-        set_status(f"不支持的文件类型: {file_extension}", "danger")
+        set_status(f"不支持的文件类型: {ext}", "danger")
 
 def update_grid_lines(event):
-    """当宫格数量变化时，更新分割线"""
+    """当宫格数量变化时，更新分割线（修复删空时报异常红字的体验缺陷）"""
+    row_val = grid_row_entry.get().strip()
+    col_val = grid_col_entry.get().strip()
+    if not row_val or not col_val:
+        return  # 如果用户正在删改使其临时为空，则静默，不弹出错误警告
     try:
-        grid_row = int(grid_row_entry.get())
-        grid_col = int(grid_col_entry.get())
+        grid_row = int(row_val)
+        grid_col = int(col_val)
         if grid_row < 1 or grid_col < 1:
             raise ValueError
         draw_split_line()
     except ValueError:
-        set_status("行数和列数必须为大于等于1的整数。", "danger")
+        pass
 
-def get_original_image(file_path, file_extension):
+def get_original_image(target_file_path, target_file_extension):
     """加载原始图像或 PDF 页面"""
-    if file_extension == '.heic':
-        heif_file = pillow_heif.read_heif(file_path)
+    if target_file_extension == '.heic':
+        heif_file = pillow_heif.read_heif(target_file_path)
         img = Image.frombytes(
             heif_file.mode,
             heif_file.size,
@@ -453,8 +485,8 @@ def get_original_image(file_path, file_extension):
             heif_file.stride,
         )
         return [img.convert("RGB")]
-    elif file_extension == '.pdf':
-        doc = fitz.open(file_path)
+    elif target_file_extension == '.pdf':
+        doc = fitz.open(target_file_path)
         images = []
         selected_dpi = dpi_var.get()
         dpi_value = 300 if selected_dpi == "默认" else int(selected_dpi)
@@ -466,7 +498,15 @@ def get_original_image(file_path, file_extension):
             images.append(img_rgb)
         return images
     else:
-        return [Image.open(file_path).convert("RGB")]
+        return [Image.open(target_file_path).convert("RGB")]
+
+def on_dpi_change(*args):
+    """DPI 下拉选择变更时的回调（修复 PDF 的 DPI 无法实时渲染的问题）"""
+    global file_path, file_extension
+    set_status(f"DPI设置为: {dpi_var.get()}", "info")
+    # 如果当前已经载入了 PDF，则重新读取 PDF 的各页并渲染
+    if file_path and file_extension == '.pdf':
+        threading.Thread(target=load_file_in_background, args=(file_path, file_extension), daemon=True).start()
 
 def open_update_link():
     """打开更新链接"""
@@ -669,8 +709,10 @@ dpi_label = ttk.Label(top_menu, text="保存DPI:", bootstyle="secondary")
 dpi_label.pack(side=tk.LEFT, padx=5)
 dpi_combobox = ttk.Combobox(top_menu, textvariable=dpi_var, values=["默认", "72", "150", "300"], width=5)
 dpi_combobox.pack(side=tk.LEFT, padx=10, pady=5)
-dpi_combobox.bind("<<ComboboxSelected>>", lambda event: set_status(f"DPI设置为: {dpi_var.get()}", "info"))
-dpi_combobox.bind("<FocusOut>", lambda event: set_status(f"DPI设置为: {dpi_var.get()}", "info"))
+
+# 使用安全的 DPI 联动方案
+dpi_combobox.bind("<<ComboboxSelected>>", on_dpi_change)
+dpi_combobox.bind("<FocusOut>", on_dpi_change)
 
 save_format_var = tk.StringVar(value='.jpg')
 save_format_label = ttk.Label(top_menu, text="保存格式:", bootstyle="secondary")
@@ -756,9 +798,15 @@ image_canvas.bind("<MouseWheel>", lambda event: zoom_in(event) if event.delta > 
 image_canvas.bind("<Button-4>", lambda event: zoom_in(event))  # Linux
 image_canvas.bind("<Button-5>", lambda event: zoom_out(event))  # Linux
 
-# 绑定窗口大小变化事件（防抖）
+# 绑定窗口大小变化事件（防抖 + 大小变化双重过滤）
 def on_resize(event):
-    global window_resize_id
+    global window_resize_id, last_canvas_width, last_canvas_height
+    # 过滤非实际尺寸改变的无效 Configure 事件，避免无谓重绘
+    if event.width == last_canvas_width and event.height == last_canvas_height:
+        return
+    last_canvas_width = event.width
+    last_canvas_height = event.height
+    
     if window_resize_id:
         root.after_cancel(window_resize_id)
     window_resize_id = root.after(100, display_image)
