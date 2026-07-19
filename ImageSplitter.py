@@ -19,7 +19,7 @@ except ImportError:
     print("Warning: tkinterdnd2 not installed. Drag-and-drop disabled.")
 
 __app_name__ = "ImageSplitter"
-__version__ = "2.1"
+__version__ = "2.5"
 __author__ = "QwejayHuang"
 __company__ = "QwejayHuang"
 __description__ = "图片与 PDF 自动裁剪及分割工具"
